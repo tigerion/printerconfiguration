@@ -1,9 +1,36 @@
-# Function to parse argument string into a hashtable for Run-AtomicTest
+# Path to the CSV file containing TTPs and test numbers
+$csvFilePath = "C:\AtomicRedTeam\ExecutedTTPs_TEST.csv"  # Adjust this path
+
+# Logging function to capture output to both console and log file
+function Log-Message {
+    param (
+        [string]$message
+    )
+    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    $logEntry = "$timestamp - $message"
+    Write-Host $logEntry
+    Add-Content -Path $logFilePath -Value $logEntry
+}
+
+# Function to capture current environment variables
+function Capture-EnvironmentVariables {
+    Log-Message "Capturing environment variables..."
+
+    # Capture user and system environment variables
+    $envVariables = @{
+        "User" = [System.Collections.Hashtable]::Synchronized([System.Environment]::GetEnvironmentVariables("User"))
+        "System" = [System.Collections.Hashtable]::Synchronized([System.Environment]::GetEnvironmentVariables("Machine"))
+    }
+
+    Log-Message "Environment variables captured."
+    return $envVariables
+}
+
+# Function to parse arguments into hashtable
 function Parse-Arguments {
     param (
         [string]$argString
     )
-
     $argHashtable = @{}
 
     # Check if there are any arguments
@@ -12,118 +39,176 @@ function Parse-Arguments {
         $argPairs = $argString -split ','
 
         foreach ($pair in $argPairs) {
-            # Ensure we only split valid key-value pairs
+            # Split each pair by '=' and add it to the hashtable
             if ($pair -match '=') {
                 $key, $value = $pair -split '=', 2
-                $key = $key.Trim()   # Ensure key is a string
-                $value = $value.Trim()  # Ensure value is a string
-
-                # Add the key-value pair to the hashtable
-                $argHashtable[$key] = $value
+                Log-Message "key= $($key) value=$($value)"
+                $key = [string]$key.Trim() # Remove extra spaces
+                $value = [string]$value.Trim() # Remove extra spaces
+                Log-Message "keyAfterTrim= $($key) valueAfterTrim= $($value)"
+                $argHashtable[$key] = $value # Add key-value pair to hashtable
             } else {
                 Log-Message "Invalid argument format: $pair. Skipping."
             }
         }
     }
-
-    # Log the contents of the hashtable for verification
-    Log-Message "Parsed Arguments Hashtable: $(ConvertTo-Json $argHashtable)"
     return $argHashtable
 }
 
-# Function to log messages to a log file
-function Log-Message {
+# Function to restore environment variables
+function Restore-EnvironmentVariables {
     param (
-        [string]$message,
-        [string]$logFile
+        [hashtable]$originalEnv
     )
 
-    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-    Add-Content -Path $logFile -Value "$timestamp - $message"
+    Log-Message "Restoring environment variables..."
+
+    # Restore user environment variables
+    foreach ($key in $originalEnv["User"].Keys) {
+        [System.Environment]::SetEnvironmentVariable($key, $originalEnv["User"][$key], "User")
+    }
+
+    # Restore system environment variables (requires elevated permissions)
+    foreach ($key in $originalEnv["System"].Keys) {
+        try {
+            [System.Environment]::SetEnvironmentVariable($key, $originalEnv["System"][$key], "Machine")
+        } catch {
+            Log-Message "Error restoring system environment variable ${key}: $_"
+        }
+    }
+
+    Log-Message "Environment variables restored."
 }
 
-# Function to close instances of Calculator and Notepad
-function Close-Processes {
-    Get-Process "calc", "notepad" -ErrorAction SilentlyContinue | ForEach-Object {
-        Log-Message "Closing process: $($_.ProcessName)" -logFile $logFile
-        Stop-Process -Id $_.Id -Force
+# Function to kill Calculator (calc.exe) and Notepad (notepad.exe) processes
+function Close-RemainingProcesses {
+    param (
+        [string[]]$processesToKill = @("notepad", "calc")
+    )
+
+    foreach ($processName in $processesToKill) {
+        $runningProcesses = Get-Process -Name $processName -ErrorAction SilentlyContinue
+        if ($runningProcesses) {
+            foreach ($process in $runningProcesses) {
+                try {
+                    $process.CloseMainWindow() | Out-Null
+                    if (-not $process.WaitForExit(5)) {
+                        $process.Kill()
+                        Log-Message "$processName (PID: $($process.Id)) killed."
+                    } else {
+                        Log-Message "$processName (PID: $($process.Id)) closed gracefully."
+                    }
+                } catch {
+                    Log-Message "Error while closing $processName (PID: $($process.Id)): $_"
+                }
+            }
+        } else {
+            Log-Message "No $processName processes found running."
+        }
     }
 }
 
-# Main script starts here
-$csvPath = "path_to_your_csv_file.csv"  # Replace with the actual path to your CSV
-$logFile = "C:\Path\To\Your\LogFile_$(Get-Date -Format 'yyyyMMdd').log"  # Replace with your desired log file path
+# Function to run Atomic Test and Cleanup
+function Run-AtomicTest {
+    param (
+        [string]$ttpID,
+        [int]$testNumber,
+        [hashtable]$testArgs
+    )
 
-# Import the CSV file
-$ttpTests = Import-Csv -Path $csvPath
+    $testID = "${ttpID}.${testNumber}"
 
-# Initialize a list to hold parsed test details
-$testDetailsList = @()
-
-# Loop through each row in the CSV
-foreach ($row in $ttpTests) {
-    $ttpID = $row.TTP
-    $testNumber = $row.TestNumber
-    $testArgs = $row.Arguments -replace '^\s*|\s*$', ''  # Trim any whitespace
-
-    # Log the values being processed
-    Log-Message "Processing TTP: $ttpID, Test Number: $testNumber, Arguments: '$testArgs'"
-
-    # Check if arguments are not empty and proceed to parse them
-    if (-not [string]::IsNullOrEmpty($testArgs)) {
-        # Parse arguments into a hashtable
-        $myArgs = Parse-Arguments -argString $testArgs
-    } else {
-        $myArgs = @{}  # Empty hashtable if no arguments
-        Log-Message "No arguments provided for Test Number: $testNumber"
-    }
-
-    # Create a test detail object to store test number and arguments
-    $testDetail = [PSCustomObject]@{
-        TTP        = $ttpID
-        TestNumber = $testNumber
-        Arguments  = $myArgs  # Store the hashtable here
-    }
-
-    # Add the test detail to the list
-    $testDetailsList += $testDetail
-}
-
-# Output the collected test details for verification
-$testDetailsList | Format-Table
-
-# Loop through each test detail in the collected test details list
-foreach ($testDetail in $testDetailsList) {
-    $ttpID = $testDetail.TTP
-    $testNumber = $testDetail.TestNumber
-    $myArgs = $testDetail.Arguments  # This is your parsed arguments hashtable
-
-    # Log the test details being processed
-    Log-Message "Running Test - TTP: $ttpID, Test Number: $testNumber"
-
-    # Prepare the argument structure for Run-AtomicTest
-    $arguments = @{}
-
-    # Check if arguments are provided
-    if ($myArgs) {
-        $arguments = $myArgs  # Use the hashtable of arguments if available
-    }
-
-    # Log the arguments being passed
-    Log-Message "Arguments for Run-AtomicTest: $(ConvertTo-Json $arguments)"
-
+    # Try to run the test, handle any errors, and ensure cleanup
     try {
-        # Run the Atomic Test
-        Run-AtomicTest -TTPID $ttpID -TestNumber $testNumber -Arguments $arguments
-        Log-Message "Successfully ran Test - TTP: $ttpID, Test Number: $testNumber" -logFile $logFile
+        Log-Message "Starting Atomic Test $testID with arguments: $testArgs"
+        Invoke-AtomicTest $ttpID -TestNumbers $testNumber -InputArgs $testArgs
+        Log-Message "Successfully executed Atomic Test $testID"
     } catch {
-        # Log the error if the test fails
-        Log-Message "Error running Test - TTP: $ttpID, Test Number: $testNumber. Error: $_" -logFile $logFile
+        Log-Message "Error executing Atomic Test ${testID}: $_"
+        if ($_.Exception) {
+            Log-Message "Exception details: $($_.Exception.Message)"
+        }
+    } finally {
+        # Ensure cleanup is executed
+        try {
+            Log-Message "Starting cleanup for Atomic Test $testID"
+            Invoke-AtomicTest $ttpID -TestNumbers $testNumber -Cleanup
+            Log-Message "Cleanup successful for Atomic Test $testID"
+        } catch {
+            Log-Message "Error during cleanup for Atomic Test ${testID}: $_"
+            if ($_.Exception) {
+                Log-Message "Cleanup Exception details: $($_.Exception.Message)"
+            }
+        }
     }
 }
 
-# Perform cleanup after all tests are executed
-Close-Processes
+# Create log file with current date in the filename
+$logDate = Get-Date -Format "yyyy-MM-dd"
+$logFilePath = "C:\AtomicRedTeam\ExecutionLogs\AtomicTestLog-$logDate.txt"  # Adjust path as necessary
 
-# Log cleanup completion
-Log-Message "Completed cleanup of Calculator and Notepad processes." -logFile $logFile
+# Capture the original environment variables before running the tests
+$originalEnv = Capture-EnvironmentVariables
+
+# Read TTPs, Test Numbers, and Arguments from CSV file
+$ttpTests = @{}
+
+try {
+    # Read CSV and populate $ttpTests hashtable
+    $csvContent = Import-Csv -Path $csvFilePath -Header "TTP", "TestNumber", "Arguments"
+    foreach ($row in $csvContent) {
+        $ttpID = $row.TTP
+        if ([int]::TryParse($row.TestNumber, [ref]$testNumber)) {
+            $testNumber = [int]$row.TestNumber
+        } else {
+            Log-Message "Invalid TestNumber: '$($row.TestNumber)' for TTP '$($row.TTP)'. Skipping this entry."
+            continue
+        }
+
+        $arguments = $row.Arguments
+        $parsedArguments = Parse-Arguments -argString $arguments
+        Log-Message "Parsed Arguments for TTP $ttpID, TestNumber $testNumber: $parsedArguments"
+
+        # Store the test number and parsed arguments in the hashtable
+        if (-not $ttpTests.ContainsKey($ttpID)) {
+            $ttpTests[$ttpID] = @()
+        }
+        $ttpTests[$ttpID] += @{
+            TestNumber = $testNumber
+            Arguments = $parsedArguments  # Store parsed arguments
+        }
+    }
+
+    Log-Message "Successfully read TTPs, test numbers, and arguments from CSV."
+} catch {
+    Log-Message "Error reading from CSV: $_"
+    exit 1  # Exit the script if CSV reading fails
+}
+
+# Loop through each TTP and its test numbers
+foreach ($ttpID in $ttpTests.Keys) {
+    foreach ($testEntry in $ttpTests[$ttpID]) {
+        $testNumber = $testEntry.TestNumber
+        $testArgs = $testEntry.Arguments
+
+        Log-Message "Executing Test: TTP $ttpID, TestNumber $testNumber, with arguments: $testArgs"
+
+        try {
+            if ($testArgs.Count -gt 0) {
+                Run-AtomicTest -ttpID $ttpID -testNumber $testNumber -testArgs $testArgs
+            } else {
+                Run-AtomicTest -ttpID $ttpID -testNumber $testNumber
+            }
+        } catch {
+            Log-Message "Error running Testnumber $testNumber for TTP $($ttpID): $_"
+        }
+    }
+}
+
+# Restore environment variables after the tests and cleanups
+Restore-EnvironmentVariables -originalEnv $originalEnv
+Log-Message "All tests, cleanup processes, and environment restoration completed."
+
+# Close any remaining processes (calc, notepad, etc.)
+Close-RemainingProcesses
+Log-Message "All remaining notepad and calculator processes were closed."
