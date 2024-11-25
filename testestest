@@ -1,0 +1,179 @@
+# Path to the CSV file containing TTPs and test numbers
+$csvFilePath = "C:\AtomicRedTeam\ExecutedTTPs_TEST.csv"  # Adjust this path
+
+# Logging function to capture output to both console and log file
+function Log-Message {
+    param (
+        [string]$message
+    )
+    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    $logEntry = "$timestamp - $message"
+    Write-Host $logEntry
+    Add-Content -Path $logFilePath -Value $logEntry
+}
+
+# Function to parse arguments into hashtable
+function Parse-Arguments {
+    param (
+        [string]$argString
+    )
+    $argHashtable = @{}
+
+    if (-not [string]::IsNullOrEmpty($argString)) {
+        $argPairs = $argString -split ','
+
+        foreach ($pair in $argPairs) {
+            if ($pair -match '=') {
+                $key, $value = $pair -split '=', 2
+                $key = $key.Trim()
+                $value = $value.Trim()
+                $argHashtable[$key] = $value
+            } else {
+                Log-Message "Invalid argument format: $pair. Skipping."
+            }
+        }
+    }
+    return $argHashtable
+}
+
+# Function to capture current environment variables
+function Capture-EnvironmentVariables {
+    Log-Message "Capturing environment variables..."
+    $envVariables = @{
+        "User" = [System.Collections.Hashtable]::Synchronized([System.Environment]::GetEnvironmentVariables("User"))
+        "System" = [System.Collections.Hashtable]::Synchronized([System.Environment]::GetEnvironmentVariables("Machine"))
+    }
+    Log-Message "Environment variables captured."
+    return $envVariables
+}
+
+# Function to restore environment variables
+function Restore-EnvironmentVariables {
+    param (
+        [hashtable]$originalEnv
+    )
+
+    Log-Message "Restoring environment variables..."
+    foreach ($key in $originalEnv["User"].Keys) {
+        [System.Environment]::SetEnvironmentVariable($key, $originalEnv["User"][$key], "User")
+    }
+    foreach ($key in $originalEnv["System"].Keys) {
+        try {
+            [System.Environment]::SetEnvironmentVariable($key, $originalEnv["System"][$key], "Machine")
+        } catch {
+            Log-Message "Error restoring system environment variable $key: $_"
+        }
+    }
+    Log-Message "Environment variables restored."
+}
+
+# Function to close remaining processes
+function Close-RemainingProcesses {
+    param (
+        [string[]]$processesToKill = @("notepad", "calc")
+    )
+    foreach ($processName in $processesToKill) {
+        $runningProcesses = Get-Process -Name $processName -ErrorAction SilentlyContinue
+        if ($runningProcesses) {
+            foreach ($process in $runningProcesses) {
+                try {
+                    $process.CloseMainWindow() | Out-Null
+                    if (-not $process.WaitForExit(5)) {
+                        $process.Kill()
+                        Log-Message "$processName (PID: $($process.Id)) killed."
+                    } else {
+                        Log-Message "$processName (PID: $($process.Id)) closed gracefully."
+                    }
+                } catch {
+                    Log-Message "Error while closing $processName (PID: $($process.Id)): $_"
+                }
+            }
+        } else {
+            Log-Message "No $processName processes found running."
+        }
+    }
+}
+
+# Function to run Atomic Test
+function Run-AtomicTest {
+    param (
+        [string]$ttpID,
+        [int]$testNumber = $null,
+        [hashtable]$testArgs = $null
+    )
+
+    $testID = if ($testNumber) { "${ttpID}.${testNumber}" } else { $ttpID }
+
+    try {
+        if ($testNumber -and $testArgs) {
+            Log-Message "Executing test $testID with arguments $testArgs"
+            Invoke-AtomicTest $ttpID -TestNumbers $testNumber -InputArgs $testArgs
+        } elseif ($testNumber) {
+            Log-Message "Executing test $testID without arguments"
+            Invoke-AtomicTest $ttpID -TestNumbers $testNumber
+        } else {
+            Log-Message "Executing TTP $ttpID without a test number"
+            Invoke-AtomicTest $ttpID
+        }
+        Log-Message "Successfully executed $testID"
+    } catch {
+        Log-Message "Error executing $testID: $_"
+    } finally {
+        try {
+            Log-Message "Starting cleanup for $testID"
+            Invoke-AtomicTest $ttpID -TestNumbers $testNumber -Cleanup
+            Log-Message "Cleanup successful for $testID"
+        } catch {
+            Log-Message "Error during cleanup for $testID: $_"
+        }
+    }
+}
+
+# Create log file with current date in the filename
+$logDate = Get-Date -Format "yyyy-MM-dd"
+$logFilePath = "C:\AtomicRedTeam\ExecutionLogs\AtomicTestLog-$logDate.txt"  # Adjust path as necessary
+
+# Capture the original environment variables before running the tests
+$originalEnv = Capture-EnvironmentVariables
+
+# Read TTPs, Test Numbers, and Arguments from CSV file
+$ttpTests = @{}
+
+try {
+    $csvContent = Import-Csv -Path $csvFilePath -Header "TTP", "TestNumber", "Arguments"
+    foreach ($row in $csvContent) {
+        $ttpID = $row.TTP
+        $testNumber = if ([int]::TryParse($row.TestNumber, [ref]$tempNumber)) { [int]$tempNumber } else { $null }
+        $arguments = $row.Arguments
+        $parsedArguments = if ($arguments) { Parse-Arguments -argString $arguments } else { $null }
+
+        if (-not $ttpTests.ContainsKey($ttpID)) {
+            $ttpTests[$ttpID] = @()
+        }
+        $ttpTests[$ttpID] += @{
+            TestNumber = $testNumber
+            Arguments = $parsedArguments
+        }
+    }
+    Log-Message "Successfully read TTPs, test numbers, and arguments from CSV."
+} catch {
+    Log-Message "Error reading from CSV: $_"
+    exit 1
+}
+
+# Execute each test
+foreach ($ttpID in $ttpTests.Keys) {
+    foreach ($testEntry in $ttpTests[$ttpID]) {
+        $testNumber = $testEntry.TestNumber
+        $testArgs = $testEntry.Arguments
+        Run-AtomicTest -ttpID $ttpID -testNumber $testNumber -testArgs $testArgs
+    }
+}
+
+# Restore environment variables and cleanup remaining processes
+Restore-EnvironmentVariables -originalEnv $originalEnv
+Log-Message "Environment variables restored."
+Close-RemainingProcesses
+Log-Message "All remaining notepad and calculator processes were closed."
+
+Log-Message "All tests, cleanup, and environment restoration completed."
