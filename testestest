@@ -138,11 +138,11 @@ $originalEnv = Capture-EnvironmentVariables
 
 # Read TTPs, Test Numbers, and Arguments from CSV file
 $ttpTests = @{}
-
 try {
     $csvContent = Import-Csv -Path $csvFilePath -Header "TTP", "TestNumber", "Arguments"
     foreach ($row in $csvContent) {
         $ttpID = $row.TTP
+        $tempNumber = $null  # Initialize the variable for TryParse
         $testNumber = if ([int]::TryParse($row.TestNumber, [ref]$tempNumber)) { [int]$tempNumber } else { $null }
         $arguments = $row.Arguments
         $parsedArguments = if ($arguments) { Parse-Arguments -argString $arguments } else { $null }
