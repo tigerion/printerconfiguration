@@ -8,8 +8,9 @@ function Run-AtomicTest {
     $testID = if ($testNumber) { "${ttpID}.${testNumber}" } else { $ttpID }
 
     try {
+        # Execute the test with or without arguments
         if ($testNumber -and $testArgs) {
-            Log-Message "Executing test $testID with arguments $testArgs"
+            Log-Message "Executing test $testID with arguments: $testArgs"
             Invoke-AtomicTest $ttpID -TestNumbers $testNumber -InputArgs $testArgs
         } elseif ($testNumber) {
             Log-Message "Executing test $testID without arguments"
@@ -22,13 +23,18 @@ function Run-AtomicTest {
     } catch {
         Log-Message "Error executing $testID: $_"
     } finally {
+        # Cleanup process
         try {
             Log-Message "Starting cleanup for $testID"
+            if ($testNumber) {
+                # Cleanup for specific test number
+                $cleanupResult = Invoke-AtomicTest $ttpID -TestNumbers $testNumber -Cleanup -Verbose 4>&1 | Out-String
+            } else {
+                # Cleanup for the entire TTP
+                $cleanupResult = Invoke-AtomicTest $ttpID -Cleanup -Verbose 4>&1 | Out-String
+            }
 
-            # Start cleanup process
-            $cleanupResult = Invoke-AtomicTest $ttpID -TestNumbers $testNumber -Cleanup -Verbose 4>&1 | Out-String
-
-            # Wait until cleanup tasks have completed or verify output
+            # Wait until cleanup is confirmed or log possible issues
             if ($cleanupResult -match "Cleanup completed|Success") {
                 Log-Message "Cleanup completed for $testID: $cleanupResult"
             } else {
