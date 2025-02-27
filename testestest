@@ -1,3 +1,91 @@
+# Path to the CSV file containing TTPs and test numbers
+$csvFilePath = "C:\AtomicRedTeam\ExecutedTTPs_TEST.csv"  # Adjust this path
+
+# Create log file with current date in the filename
+$logDate = Get-Date -Format "yyyy-MM-dd"
+$logFilePath = "C:\AtomicRedTeam\ExecutionLogs\AtomicTestLog-$logDate.txt"  # Adjust path as necessary
+
+###  LOGGING FUNCTION ###
+function Log-Message {
+    param ([string]$message)
+    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    $logEntry = "$timestamp - $message"
+    Write-Host $logEntry
+    Add-Content -Path $logFilePath -Value $logEntry
+}
+
+###  ENVIRONMENT VARIABLE BACKUP ###
+function Capture-EnvironmentVariables {
+    Log-Message "Capturing environment variables..."
+    $envVariables = @{
+        "User"   = [System.Collections.Hashtable]::Synchronized([System.Environment]::GetEnvironmentVariables("User"))
+        "System" = [System.Collections.Hashtable]::Synchronized([System.Environment]::GetEnvironmentVariables("Machine"))
+    }
+    Log-Message "Environment variables captured."
+    return $envVariables
+}
+
+###  ENVIRONMENT VARIABLE RESTORATION ###
+function Restore-EnvironmentVariables {
+    param ([hashtable]$originalEnv)
+    Log-Message "Restoring environment variables..."
+    foreach ($key in $originalEnv["User"].Keys) {
+        [System.Environment]::SetEnvironmentVariable($key, $originalEnv["User"][$key], "User")
+    }
+    foreach ($key in $originalEnv["System"].Keys) {
+        try {
+            [System.Environment]::SetEnvironmentVariable($key, $originalEnv["System"][$key], "Machine")
+        } catch {
+            Log-Message "Error restoring system environment variable $key: $_"
+        }
+    }
+    Log-Message "Environment variables restored."
+}
+
+###  PROCESS CLEANUP (Notepad & Calculator) ###
+function Close-RemainingProcesses {
+    param ([string[]]$processesToKill = @("notepad", "calc"))
+    foreach ($processName in $processesToKill) {
+        $runningProcesses = Get-Process -Name $processName -ErrorAction SilentlyContinue
+        if ($runningProcesses) {
+            foreach ($process in $runningProcesses) {
+                try {
+                    $process.CloseMainWindow() | Out-Null
+                    if (-not $process.WaitForExit(5)) {
+                        $process.Kill()
+                        Log-Message "$processName (PID: $($process.Id)) killed."
+                    } else {
+                        Log-Message "$processName (PID: $($process.Id)) closed gracefully."
+                    }
+                } catch {
+                    Log-Message "Error while closing $processName (PID: $($process.Id)): $_"
+                }
+            }
+        } else {
+            Log-Message "No $processName processes found running."
+        }
+    }
+}
+
+###  PARSE ARGUMENTS INTO HASHTABLE ###
+function Parse-Arguments {
+    param ([string]$argString)
+    $argHashtable = @{}
+    if (-not [string]::IsNullOrEmpty($argString)) {
+        $argPairs = $argString -split ','
+        foreach ($pair in $argPairs) {
+            if ($pair -match '=') {
+                $key, $value = $pair -split '=', 2
+                $argHashtable[$key.Trim()] = $value.Trim()
+            } else {
+                Log-Message "Invalid argument format: $pair. Skipping."
+            }
+        }
+    }
+    return $argHashtable
+}
+
+###  RUN ATOMIC TEST ###
 function Run-AtomicTest {
     param (
         [string]$ttpID,
@@ -8,7 +96,6 @@ function Run-AtomicTest {
     $testID = if ($testNumber) { "${ttpID}.${testNumber}" } else { $ttpID }
 
     try {
-        # Execute the test with or without arguments
         if ($testNumber -and $testArgs) {
             Log-Message "Executing test $testID with arguments: $testArgs"
             Invoke-AtomicTest $ttpID -TestNumbers $testNumber -InputArgs $testArgs
@@ -23,18 +110,15 @@ function Run-AtomicTest {
     } catch {
         Log-Message "Error executing $testID: $_"
     } finally {
-        # Cleanup process
         try {
             Log-Message "Starting cleanup for $testID"
             if ($testNumber) {
-                # Cleanup for specific test number
                 $cleanupResult = Invoke-AtomicTest $ttpID -TestNumbers $testNumber -Cleanup -Verbose 4>&1 | Out-String
             } else {
-                # Cleanup for the entire TTP
                 $cleanupResult = Invoke-AtomicTest $ttpID -Cleanup -Verbose 4>&1 | Out-String
             }
 
-            # Wait until cleanup is confirmed or log possible issues
+            #  Ensure Cleanup Finishes Before Proceeding
             if ($cleanupResult -match "Cleanup completed|Success") {
                 Log-Message "Cleanup completed for $testID: $cleanupResult"
             } else {
@@ -45,3 +129,44 @@ function Run-AtomicTest {
         }
     }
 }
+
+###  EXECUTION STARTS HERE ###
+$originalEnv = Capture-EnvironmentVariables
+$ttpTests = @{}
+
+try {
+    $csvContent = Import-Csv -Path $csvFilePath -Header "TTP", "TestNumber", "Arguments"
+    foreach ($row in $csvContent) {
+        $ttpID = $row.TTP
+        $testNumber = if ([int]::TryParse($row.TestNumber, [ref]$tempNumber)) { [int]$tempNumber } else { $null }
+        $arguments = $row.Arguments
+        $parsedArguments = if ($arguments) { Parse-Arguments -argString $arguments } else { $null }
+
+        if (-not $ttpTests.ContainsKey($ttpID)) {
+            $ttpTests[$ttpID] = @()
+        }
+        $ttpTests[$ttpID] += @{
+            TestNumber = $testNumber
+            Arguments = $parsedArguments
+        }
+    }
+    Log-Message "Successfully read TTPs, test numbers, and arguments from CSV."
+} catch {
+    Log-Message "Error reading from CSV: $_"
+    exit 1
+}
+
+#  EXECUTE ALL TESTS
+foreach ($ttpID in $ttpTests.Keys) {
+    foreach ($testEntry in $ttpTests[$ttpID]) {
+        Run-AtomicTest -ttpID $ttpID -testNumber $testEntry.TestNumber -testArgs $testEntry.Arguments
+    }
+}
+
+#  POST-EXECUTION TASKS
+Restore-EnvironmentVariables -originalEnv $originalEnv
+Log-Message "Environment variables restored."
+Close-RemainingProcesses
+Log-Message "All remaining Notepad and Calculator processes were closed."
+
+Log-Message " ALL TESTS, CLEANUP, AND ENVIRONMENT RESTORATION COMPLETED "
