@@ -1,11 +1,14 @@
-# Path to the CSV file containing TTPs and test numbers
+# ------------------------------ CONFIGURATION ------------------------------
+# Path to the CSV file containing TTPs, TestNumbers, and Arguments
 $csvFilePath = "C:\AtomicRedTeam\ExecutedTTPs_TEST.csv"  # Adjust this path
 
 # Create log file with current date in the filename
 $logDate = Get-Date -Format "yyyy-MM-dd"
 $logFilePath = "C:\AtomicRedTeam\ExecutionLogs\AtomicTestLog-$logDate.txt"  # Adjust path as necessary
 
-###  LOGGING FUNCTION ###
+# ------------------------------ FUNCTIONS ------------------------------
+
+### Logging function (writes to console and log file)
 function Log-Message {
     param ([string]$message)
     $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
@@ -14,7 +17,7 @@ function Log-Message {
     Add-Content -Path $logFilePath -Value $logEntry
 }
 
-###  ENVIRONMENT VARIABLE BACKUP ###
+### Backup current environment variables
 function Capture-EnvironmentVariables {
     Log-Message "Capturing environment variables..."
     $envVariables = @{
@@ -25,7 +28,7 @@ function Capture-EnvironmentVariables {
     return $envVariables
 }
 
-###  ENVIRONMENT VARIABLE RESTORATION ###
+### Restore environment variables from backup
 function Restore-EnvironmentVariables {
     param ([hashtable]$originalEnv)
     Log-Message "Restoring environment variables..."
@@ -42,7 +45,7 @@ function Restore-EnvironmentVariables {
     Log-Message "Environment variables restored."
 }
 
-###  PROCESS CLEANUP (Notepad & Calculator) ###
+### Kill remaining processes (e.g. Notepad and Calculator)
 function Close-RemainingProcesses {
     param ([string[]]$processesToKill = @("notepad", "calc"))
     foreach ($processName in $processesToKill) {
@@ -67,7 +70,7 @@ function Close-RemainingProcesses {
     }
 }
 
-###  PARSE ARGUMENTS INTO HASHTABLE ###
+### Parse the Arguments string from CSV into a hashtable
 function Parse-Arguments {
     param ([string]$argString)
     $argHashtable = @{}
@@ -85,17 +88,17 @@ function Parse-Arguments {
     return $argHashtable
 }
 
-###  RUN ATOMIC TEST ###
+### Execute an Atomic Test (and perform its cleanup)
 function Run-AtomicTest {
     param (
         [string]$ttpID,
         [int]$testNumber = $null,
         [hashtable]$testArgs = $null
     )
-
     $testID = if ($testNumber) { "${ttpID}.${testNumber}" } else { $ttpID }
 
     try {
+        # Execute the test based on available parameters
         if ($testNumber -and $testArgs) {
             Log-Message "Executing test $testID with arguments: $testArgs"
             Invoke-AtomicTest $ttpID -TestNumbers $testNumber -InputArgs $testArgs
@@ -110,44 +113,56 @@ function Run-AtomicTest {
     } catch {
         Log-Message "Error executing $testID: $_"
     } finally {
+        # Perform Atomic Red Team cleanup
         try {
-            Log-Message "Starting cleanup for $testID"
+            Log-Message "Starting Atomic Red Team cleanup for $testID"
             if ($testNumber) {
                 $cleanupResult = Invoke-AtomicTest $ttpID -TestNumbers $testNumber -Cleanup -Verbose 4>&1 | Out-String
             } else {
                 $cleanupResult = Invoke-AtomicTest $ttpID -Cleanup -Verbose 4>&1 | Out-String
             }
-
-            #  Ensure Cleanup Finishes Before Proceeding
             if ($cleanupResult -match "Cleanup completed|Success") {
-                Log-Message "Cleanup completed for $testID: $cleanupResult"
+                Log-Message "Atomic Red Team cleanup completed for $testID: $cleanupResult"
             } else {
-                Log-Message "Cleanup may not have fully completed for $testID. Output: $cleanupResult"
+                Log-Message "Atomic Red Team cleanup may not have fully completed for $testID. Output: $cleanupResult"
             }
         } catch {
-            Log-Message "Error during cleanup for $testID: $_"
+            Log-Message "Error during Atomic Red Team cleanup for $testID: $_"
         }
     }
 }
 
-###  EXECUTION STARTS HERE ###
+# ------------------------------ MAIN EXECUTION ------------------------------
+
+# Capture environment variables backup
 $originalEnv = Capture-EnvironmentVariables
+
+# Initialize a hashtable to store tests by TTP
 $ttpTests = @{}
 
+# Read and parse the CSV file robustly
 try {
     $csvContent = Import-Csv -Path $csvFilePath -Header "TTP", "TestNumber", "Arguments"
     foreach ($row in $csvContent) {
         $ttpID = $row.TTP
-        $testNumber = if ([int]::TryParse($row.TestNumber, [ref]$tempNumber)) { [int]$tempNumber } else { $null }
+        if ([string]::IsNullOrEmpty($ttpID)) {
+            Log-Message "Row with missing TTP identifier found; skipping."
+            continue
+        }
+        # Use a temporary variable for TestNumber parsing
+        $parsedTestNumber = $null
+        $testNumber = $null
+        if ($row.TestNumber -and [int]::TryParse($row.TestNumber, [ref]$parsedTestNumber)) {
+            $testNumber = $parsedTestNumber
+        }
         $arguments = $row.Arguments
-        $parsedArguments = if ($arguments) { Parse-Arguments -argString $arguments } else { $null }
-
+        $parsedArguments = if ($arguments -and $arguments.Trim() -ne "") { Parse-Arguments -argString $arguments } else { $null }
         if (-not $ttpTests.ContainsKey($ttpID)) {
             $ttpTests[$ttpID] = @()
         }
         $ttpTests[$ttpID] += @{
             TestNumber = $testNumber
-            Arguments = $parsedArguments
+            Arguments  = $parsedArguments
         }
     }
     Log-Message "Successfully read TTPs, test numbers, and arguments from CSV."
@@ -156,17 +171,17 @@ try {
     exit 1
 }
 
-#  EXECUTE ALL TESTS
+# Execute each test
 foreach ($ttpID in $ttpTests.Keys) {
     foreach ($testEntry in $ttpTests[$ttpID]) {
         Run-AtomicTest -ttpID $ttpID -testNumber $testEntry.TestNumber -testArgs $testEntry.Arguments
     }
 }
 
-#  POST-EXECUTION TASKS
+# Post-execution: restore environment variables and close any remaining processes
 Restore-EnvironmentVariables -originalEnv $originalEnv
 Log-Message "Environment variables restored."
 Close-RemainingProcesses
 Log-Message "All remaining Notepad and Calculator processes were closed."
 
-Log-Message " ALL TESTS, CLEANUP, AND ENVIRONMENT RESTORATION COMPLETED "
+Log-Message "✅ ALL TESTS, ATOMIC RED TEAM CLEANUP, PROCESS TERMINATION, AND ENVIRONMENT RESTORATION COMPLETED ✅"
