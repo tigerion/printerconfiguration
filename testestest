@@ -8,69 +8,42 @@ $logFilePath = "C:\AtomicRedTeam\ExecutionLogs\AtomicTestLog-$logDate.txt"  # Ad
  
 # ------------------------------ FUNCTIONS ------------------------------
 
------TOBEDELETED-----
-$sub = Get-EventSubscriber -SourceIdentifier EnterTimer -ErrorAction SilentlyContinue
-
-if ($sub) {
-    # 2. Stop & dispose the timer
-    $timer = $sub.SourceObject
-    if ($timer -is [System.Timers.Timer]) {
-        $timer.Stop()
-        $timer.Dispose()
-        Write-Host "Timer stopped and disposed."
-    }
-
-    # 3. Unregister the event so no orphaned events accumulate
-    Unregister-Event -SourceIdentifier EnterTimer
-    Write-Host "Event subscription removed."
-} else {
-    Write-Host "No EnterTimer subscription found in this session."
-}
---------TOBEDELETED------
- # ── Win32 keybd_event definition ──────────────────────────────────────────
-Add-Type @"
-using System;
-using System.Runtime.InteropServices;
-public static class Keyboard {
-    [DllImport("user32.dll")]
-    public static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtraInfo);
-    public const byte VK_RETURN = 0x0D;
-    public const uint KEYEVENTF_KEYUP = 0x0002;
-}
-"@
-
-# ── Start the global Enter‑press timer ────────────────────────────────────
+### ── GLOBAL ENTER-KEY PRESSER USING SendKeys ─────────────────────────────
 function Start-EnterTimer {
     param([int]$IntervalSeconds = 5)
 
-    # Create a timer that fires in this runspace
-    $timer = New-Object System.Timers.Timer ($IntervalSeconds * 1000)
-    $timer.AutoReset  = $true
-    $timer.Enabled    = $true
+    # COM object to send keys
+    $script:__wshell = New-Object -ComObject WScript.Shell
 
-    # Timer event: press Enter key
-    Register-ObjectEvent -InputObject $timer -EventName Elapsed -SourceIdentifier "EnterTimer" -Action {
-        # key down
-        [Keyboard]::keybd_event([Keyboard]::VK_RETURN, 0, 0, [UIntPtr]::Zero)
-        Start-Sleep -Milliseconds 50
-        # key up
-        [Keyboard]::keybd_event([Keyboard]::VK_RETURN, 0, [Keyboard]::KEYEVENTF_KEYUP, [UIntPtr]::Zero)
-    } | Out-Null
+    # Timer that fires in this runspace
+    $script:__enterTimer = New-Object System.Timers.Timer ($IntervalSeconds * 1000)
+    $script:__enterTimer.AutoReset = $true
+    $null = Register-ObjectEvent -InputObject $script:__enterTimer -EventName Elapsed `
+        -SourceIdentifier EnterTimer `
+        -Action {
+            try {
+                # Send Enter key to whichever window is focused
+                $script:__wshell.SendKeys("{ENTER}")
+            } catch {
+                # ignore transient COM errors
+            }
+        }
 
-    $timer.Start()
-    return $timer           # keep handle so we can stop it later
+    $script:__enterTimer.Start()
+    Log-Message "Enter-key timer started (fires every $IntervalSeconds s)."
 }
 
-# ── Stop the timer and clean up ───────────────────────────────────────────
 function Stop-EnterTimer {
-    param([System.Timers.Timer]$TimerHandle)
-
-    if ($TimerHandle) {
-        Unregister-Event -SourceIdentifier "EnterTimer" -ErrorAction SilentlyContinue
-        $TimerHandle.Stop()
-        $TimerHandle.Dispose()
+    if ($script:__enterTimer) {
+        Unregister-Event -SourceIdentifier EnterTimer -ErrorAction SilentlyContinue
+        $script:__enterTimer.Stop()
+        $script:__enterTimer.Dispose()
+        $script:__enterTimer = $null
+        if ($script:__wshell) { [System.Runtime.Interopservices.Marshal]::ReleaseComObject($script:__wshell) | Out-Null }
+        Log-Message "Enter-key timer stopped."
     }
 }
+
   
  
 ### Logging function (writes to console and log file)
@@ -203,7 +176,7 @@ function Run-AtomicTest {
 # Capture environment variables backup
 $originalEnv = Capture-EnvironmentVariables
  
-$enterTimer = Start-EnterTimer -IntervalSeconds 5
+Start-EnterTimer -IntervalSeconds 5
 Log-Message "Enter‑key timer started (fires every 5 s)."
  
 # Initialize a hashtable to store tests by TTP
@@ -255,5 +228,5 @@ Log-Message "All remaining Notepad and Calculator processes were closed."
  
 Log-Message "ALL TESTS, ATOMIC RED TEAM CLEANUP, PROCESS TERMINATION, AND ENVIRONMENT RESTORATION COMPLETED "
  
-Stop-EnterTimer -TimerHandle $enterTimer
+Stop-EnterTimer
 Log-Message "Enter‑key timer stopped."
