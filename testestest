@@ -1,3 +1,18 @@
+
+
+
+function Stop-EnterSpammer {
+    $job = Get-Job -Name EnterSpammer -ErrorAction SilentlyContinue
+    if ($job) {
+        Stop-Job   -Job $job -Force
+        Remove-Job -Job $job
+        Log-Message "Enter-spammer job stopped and removed."
+    } else {
+        Log-Message "Enter-spammer job not found."
+    }
+}
+
+
 # -------------------------------- LOGGING --------------------------------
 $logDate     = Get-Date -Format 'yyyy-MM-dd'
 $logFilePath = "$PSScriptRoot\EnterSpammer-$logDate.txt"
