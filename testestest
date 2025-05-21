@@ -1,3 +1,67 @@
+-------TESTINGONLY----
+# ─────────────────────────  CONFIG  ─────────────────────────
+$logDate     = Get-Date -Format 'yyyy-MM-dd'
+$logFilePath = "$PSScriptRoot\EnterTimerLog-$logDate.txt"
+
+# ─────────────────────  SIMPLE LOGGER  ─────────────────────
+function Log-Message {
+    param([string]$Message)
+    $ts   = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
+    $line = "$ts - $Message"
+    Write-Host $line
+    $line | Out-File -LiteralPath $logFilePath -Append -Encoding UTF8
+}
+
+# ──────────────────  ENTER-KEY TIMER (SendKeys)  ───────────
+function Start-EnterTimer {
+    param([int]$IntervalSeconds = 5)
+
+    # If already running, skip
+    if ($script:EnterTimerRunning) {
+        Log-Message "Enter-timer already running."
+        return
+    }
+
+    # COM object used to send keystrokes
+    $script:wshell = New-Object -ComObject WScript.Shell
+
+    # Timer fires on current runspace
+    $script:enterTimer = New-Object System.Timers.Timer ($IntervalSeconds * 1000)
+    $script:enterTimer.AutoReset = $true
+
+    Register-ObjectEvent -InputObject $script:enterTimer -EventName Elapsed `
+        -SourceIdentifier EnterTimerEvent `
+        -Action {
+            try { $script:wshell.SendKeys('{ENTER}') } catch {}
+        } | Out-Null
+
+    $script:enterTimer.Start()
+    $script:EnterTimerRunning = $true
+    Log-Message "Enter-key timer started (interval = $IntervalSeconds s)."
+}
+
+function Stop-EnterTimer {
+    if (-not $script:EnterTimerRunning) {
+        Log-Message "Enter-timer is not running."
+        return
+    }
+
+    try {
+        Unregister-Event -SourceIdentifier EnterTimerEvent -ErrorAction SilentlyContinue
+        $script:enterTimer.Stop()
+        $script:enterTimer.Dispose()
+        [System.Runtime.Interopservices.Marshal]::ReleaseComObject($script:wshell) | Out-Null
+    } catch {}
+
+    $script:enterTimer       = $null
+    $script:wshell           = $null
+    $script:EnterTimerRunning = $false
+    Log-Message "Enter-key timer stopped."
+}
+---------TESTINGONLY-----TOBEDELETED----
+
+
+
 # ------------------------------ CONFIGURATION ------------------------------
 # Path to the CSV file containing TTPs, TestNumbers, and Arguments
 $csvFilePath = "C:\AtomicRedTeam\ExecutedTTPs_FULL.csv"  # Adjust this path
