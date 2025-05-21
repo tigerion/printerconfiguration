@@ -1,3 +1,6 @@
+Get-Job -Name EnterSpammer -ErrorAction SilentlyContinue |
+    Stop-Job   -Force |
+    Remove-Job
 
 
 
