@@ -1,13 +1,59 @@
 # ------------------------------ CONFIGURATION ------------------------------
 # Path to the CSV file containing TTPs, TestNumbers, and Arguments
-$csvFilePath = "C:\AtomicRedTeam\ExecutedTTPs_TEST.csv"  # Adjust this path
-
+$csvFilePath = "C:\AtomicRedTeam\ExecutedTTPs_FULL.csv"  # Adjust this path
+ 
 # Create log file with current date in the filename
 $logDate = Get-Date -Format "yyyy-MM-dd"
 $logFilePath = "C:\AtomicRedTeam\ExecutionLogs\AtomicTestLog-$logDate.txt"  # Adjust path as necessary
-
+ 
 # ------------------------------ FUNCTIONS ------------------------------
 
+ # ── Win32 keybd_event definition ──────────────────────────────────────────
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public static class Keyboard {
+    [DllImport("user32.dll")]
+    public static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtraInfo);
+    public const byte VK_RETURN = 0x0D;
+    public const uint KEYEVENTF_KEYUP = 0x0002;
+}
+"@
+
+# ── Start the global Enter‑press timer ────────────────────────────────────
+function Start-EnterTimer {
+    param([int]$IntervalSeconds = 5)
+
+    # Create a timer that fires in this runspace
+    $timer = New-Object System.Timers.Timer ($IntervalSeconds * 1000)
+    $timer.AutoReset  = $true
+    $timer.Enabled    = $true
+
+    # Timer event: press Enter key
+    Register-ObjectEvent -InputObject $timer -EventName Elapsed -SourceIdentifier "EnterTimer" -Action {
+        # key down
+        [Keyboard]::keybd_event([Keyboard]::VK_RETURN, 0, 0, [UIntPtr]::Zero)
+        Start-Sleep -Milliseconds 50
+        # key up
+        [Keyboard]::keybd_event([Keyboard]::VK_RETURN, 0, [Keyboard]::KEYEVENTF_KEYUP, [UIntPtr]::Zero)
+    } | Out-Null
+
+    $timer.Start()
+    return $timer           # keep handle so we can stop it later
+}
+
+# ── Stop the timer and clean up ───────────────────────────────────────────
+function Stop-EnterTimer {
+    param([System.Timers.Timer]$TimerHandle)
+
+    if ($TimerHandle) {
+        Unregister-Event -SourceIdentifier "EnterTimer" -ErrorAction SilentlyContinue
+        $TimerHandle.Stop()
+        $TimerHandle.Dispose()
+    }
+}
+  
+ 
 ### Logging function (writes to console and log file)
 function Log-Message {
     param ([string]$message)
@@ -16,7 +62,7 @@ function Log-Message {
     Write-Host $logEntry
     Add-Content -Path $logFilePath -Value $logEntry
 }
-
+ 
 ### Backup current environment variables
 function Capture-EnvironmentVariables {
     Log-Message "Capturing environment variables..."
@@ -27,7 +73,7 @@ function Capture-EnvironmentVariables {
     Log-Message "Environment variables captured."
     return $envVariables
 }
-
+ 
 ### Restore environment variables from backup
 function Restore-EnvironmentVariables {
     param ([hashtable]$originalEnv)
@@ -39,15 +85,15 @@ function Restore-EnvironmentVariables {
         try {
             [System.Environment]::SetEnvironmentVariable($key, $originalEnv["System"][$key], "Machine")
         } catch {
-            Log-Message "Error restoring system environment variable $key: $_"
+            Log-Message "Error restoring system environment variable ${$key}: $_"
         }
     }
     Log-Message "Environment variables restored."
 }
-
+ 
 ### Kill remaining processes (e.g. Notepad and Calculator)
 function Close-RemainingProcesses {
-    param ([string[]]$processesToKill = @("notepad", "calc"))
+    param ([string[]]$processesToKill = @("notepad", "calc","win32calc"))
     foreach ($processName in $processesToKill) {
         $runningProcesses = Get-Process -Name $processName -ErrorAction SilentlyContinue
         if ($runningProcesses) {
@@ -69,7 +115,7 @@ function Close-RemainingProcesses {
         }
     }
 }
-
+ 
 ### Parse the Arguments string from CSV into a hashtable
 function Parse-Arguments {
     param ([string]$argString)
@@ -87,7 +133,7 @@ function Parse-Arguments {
     }
     return $argHashtable
 }
-
+ 
 ### Execute an Atomic Test (and perform its cleanup)
 function Run-AtomicTest {
     param (
@@ -96,7 +142,7 @@ function Run-AtomicTest {
         [hashtable]$testArgs = $null
     )
     $testID = if ($testNumber) { "${ttpID}.${testNumber}" } else { $ttpID }
-
+ 
     try {
         # Execute the test based on available parameters
         if ($testNumber -and $testArgs) {
@@ -111,7 +157,7 @@ function Run-AtomicTest {
         }
         Log-Message "Successfully executed $testID"
     } catch {
-        Log-Message "Error executing $testID: $_"
+        Log-Message "Error executing ${$testID}: $_"
     } finally {
         # Perform Atomic Red Team cleanup
         try {
@@ -122,24 +168,28 @@ function Run-AtomicTest {
                 $cleanupResult = Invoke-AtomicTest $ttpID -Cleanup -Verbose 4>&1 | Out-String
             }
             if ($cleanupResult -match "Cleanup completed|Success") {
-                Log-Message "Atomic Red Team cleanup completed for $testID: $cleanupResult"
+                Log-Message "Atomic Red Team cleanup completed for ${$testID}: $cleanupResult"
             } else {
                 Log-Message "Atomic Red Team cleanup may not have fully completed for $testID. Output: $cleanupResult"
             }
         } catch {
-            Log-Message "Error during Atomic Red Team cleanup for $testID: $_"
+            Log-Message "Error during Atomic Red Team cleanup for ${$testID}: $_"
         }
     }
 }
-
+ 
 # ------------------------------ MAIN EXECUTION ------------------------------
+
 
 # Capture environment variables backup
 $originalEnv = Capture-EnvironmentVariables
-
+ 
+$enterTimer = Start-EnterTimer -IntervalSeconds 5
+Log-Message "Enter‑key timer started (fires every 5 s)."
+ 
 # Initialize a hashtable to store tests by TTP
 $ttpTests = @{}
-
+ 
 # Read and parse the CSV file robustly
 try {
     $csvContent = Import-Csv -Path $csvFilePath -Header "TTP", "TestNumber", "Arguments"
@@ -170,18 +220,21 @@ try {
     Log-Message "Error reading from CSV: $_"
     exit 1
 }
-
+ 
 # Execute each test
 foreach ($ttpID in $ttpTests.Keys) {
     foreach ($testEntry in $ttpTests[$ttpID]) {
         Run-AtomicTest -ttpID $ttpID -testNumber $testEntry.TestNumber -testArgs $testEntry.Arguments
     }
 }
-
+ 
 # Post-execution: restore environment variables and close any remaining processes
 Restore-EnvironmentVariables -originalEnv $originalEnv
 Log-Message "Environment variables restored."
 Close-RemainingProcesses
 Log-Message "All remaining Notepad and Calculator processes were closed."
-
-Log-Message "✅ ALL TESTS, ATOMIC RED TEAM CLEANUP, PROCESS TERMINATION, AND ENVIRONMENT RESTORATION COMPLETED ✅"
+ 
+Log-Message "ALL TESTS, ATOMIC RED TEAM CLEANUP, PROCESS TERMINATION, AND ENVIRONMENT RESTORATION COMPLETED "
+ 
+Stop-EnterTimer -TimerHandle $enterTimer
+Log-Message "Enter‑key timer stopped."
