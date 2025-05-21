@@ -8,6 +8,25 @@ $logFilePath = "C:\AtomicRedTeam\ExecutionLogs\AtomicTestLog-$logDate.txt"  # Ad
  
 # ------------------------------ FUNCTIONS ------------------------------
 
+-----TOBEDELETED-----
+$sub = Get-EventSubscriber -SourceIdentifier EnterTimer -ErrorAction SilentlyContinue
+
+if ($sub) {
+    # 2. Stop & dispose the timer
+    $timer = $sub.SourceObject
+    if ($timer -is [System.Timers.Timer]) {
+        $timer.Stop()
+        $timer.Dispose()
+        Write-Host "Timer stopped and disposed."
+    }
+
+    # 3. Unregister the event so no orphaned events accumulate
+    Unregister-Event -SourceIdentifier EnterTimer
+    Write-Host "Event subscription removed."
+} else {
+    Write-Host "No EnterTimer subscription found in this session."
+}
+--------TOBEDELETED------
  # ── Win32 keybd_event definition ──────────────────────────────────────────
 Add-Type @"
 using System;
