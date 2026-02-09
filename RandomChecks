@@ -1,0 +1,234 @@
+# Define output CSV
+$csvPath = "$PSScriptRoot\SecurityChecks.csv"
+$results = @()
+
+function Add-Result {
+    param (
+        [string]$CheckName,
+        [string]$ValueFound,
+        [string]$Rating,
+        [string]$Remarks = ""
+    )
+    $obj = [PSCustomObject]@{
+        CheckName  = $CheckName
+        ValueFound = $ValueFound
+        Rating     = $Rating
+        Remarks    = $Remarks
+    }
+    $script:results += $obj
+    # Echo to stdout
+    Write-Output "${CheckName}: ${ValueFound} [${Rating}] ${Remarks}"
+}
+
+# -------------------
+# 1. Printer Driver
+# -------------------
+try {
+    $printerKey = Get-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Printers\PointAndPrint" -ErrorAction Stop
+    $value = $printerKey.RestrictDriverInstallationToAdministrators
+    if ($value -eq 0) {
+        Add-Result "Printer Driver" $value "High" ""
+    } else {
+        Add-Result "Printer Driver" $value "Info" ""
+    }
+} catch [System.UnauthorizedAccessException] {
+        Write-Output "Printer Driver: Could not perform this check (Access Denied)"
+} catch {
+    Add-Result "Printer Driver" "Not found" "Info" "Key missing, assume default secure"
+}
+
+# -------------------
+# 2. Bitlocker
+# -------------------
+$bitlockerStatus = manage-bde -status C: | Out-String
+$encrypted = $bitlockerStatus -match "Percentage Encrypted:\s+100"
+$pinSet = $bitlockerStatus -match "Key Protectors:\s+Numerical Password"
+
+if (-not $encrypted) {
+    Add-Result "Bitlocker" "Drive not encrypted" "High" ""
+} elseif (-not $pinSet) {
+    Add-Result "Bitlocker" "No preboot PIN" "Medium" ""
+} else {
+    Add-Result "Bitlocker" "Encrypted with PIN" "Info" ""
+}
+
+# -------------------
+# 3. AppLocker
+# -------------------
+try {
+    $applockerPolicy = Get-AppLockerPolicy -Effective -XML
+    Add-Result "AppLocker" $applockerPolicy "Info" ""
+} catch [System.UnauthorizedAccessException] {
+        Write-Output "AppLocker: Could not perform this check (Access Denied)"
+} catch {
+    Add-Result "AppLocker" "Failed to retrieve" "Medium" ""
+}
+
+try {
+    $deviceGuard = Get-CimInstance -ClassName Win32_DeviceGuard -Namespace root\Microsoft\Windows\DeviceGuard
+    $uciStatus = $deviceGuard.UsermodeCodeIntegrityPolicyEnforcementStatus
+    Add-Result "DeviceGuard UCI" $uciStatus "Info" ""
+} catch [System.UnauthorizedAccessException] {
+        Write-Output "AppLocker: Could not perform this check (Access Denied)"
+} catch {
+    Add-Result "DeviceGuard UCI" "Not available" "Medium" ""
+}
+
+# -------------------
+# 4. Credential Guard
+# -------------------
+try {
+    $credGuard = (Get-CimInstance -ClassName Win32_DeviceGuard -Namespace root\Microsoft\Windows\DeviceGuard).SecurityServicesRunning
+    if ($credGuard -eq 0) {
+        Add-Result "Credential Guard" $credGuard "Medium" ""
+    } else {
+        Add-Result "Credential Guard" $credGuard "Info" ""
+    }
+} catch [System.UnauthorizedAccessException] {
+        Write-Output "Credential Guard: Could not perform this check (Access Denied)"
+} catch {
+    Add-Result "Credential Guard" "Not available" "Medium" ""
+}
+
+# -------------------
+# 5. UAC
+# -------------------
+try {
+    $uac = Get-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" -Name LocalAccountTInfoenFilterPolicy
+    if ($uac.LocalAccountTInfoenFilterPolicy -eq 1) {
+        Add-Result "UAC reg key" 1 "Medium" ""
+    } else {
+        Add-Result "UAC reg key" $uac.LocalAccountTInfoenFilterPolicy "Info" ""
+    }
+} catch [System.UnauthorizedAccessException] {
+        Write-Output "UAC: Could not perform this check (Access Denied)"
+} catch {
+    Add-Result "UAC reg key" "Not found" "Info" ""
+}
+
+# -------------------
+# 6. UAC2
+# -------------------
+try {
+    $uac2 = Get-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\Installer" -Name DisableLUAInRepair
+    if ($uac2.DisableLUAInRepair -eq 1) {
+        Add-Result "UAC2" 1 "Medium" ""
+    } else {
+        Add-Result "UAC2" $uac2.DisableLUAInRepair "Info" ""
+    }
+} catch [System.UnauthorizedAccessException] {
+        Write-Output "UAC: Could not perform this check (Access Denied)"
+} catch {
+    Add-Result "UAC2" "Not found" "Info" ""
+}
+
+# -------------------
+# 7. MITM6
+# -------------------
+Add-Result "MITM6" "NaN" "NaN" "TODO: Fill details later"
+
+# -------------------
+# 8. NLA
+# -------------------
+try {
+    $nla = Get-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" -Name UserAuthentication
+    if ($nla.UserAuthentication -eq 0) {
+        Add-Result "NLA" $nla.UserAuthentication "Medium" "TODO Check if RDP is enabled on the system!"
+    } else {
+        Add-Result "NLA" $nla.UserAuthentication "Info" ""
+    }
+} catch [System.UnauthorizedAccessException] {
+        Write-Output "UAC: Could not perform this check (Access Denied)"
+} catch {
+    Add-Result "NLA" "Not found" "Medium" "TODO Check if RDP is enabled on the system. If not, Info"
+}
+
+# -------------------
+# 9. NTLMv1 on Clients
+# -------------------
+try {
+    $ntlm = Get-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa" -Name LmCompatibilityLevel
+    if ($ntlm.LmCompatibilityLevel -in 0..2) {
+        Add-Result "NTLMv1 on Clients" $ntlm.LmCompatibilityLevel "High" "This is only for clients! Check Group3r for policies on servers"
+    } else {
+        Add-Result "NTLMv1 on Clients" $ntlm.LmCompatibilityLevel "Info" ""
+    }
+} catch [System.UnauthorizedAccessException] {
+        Write-Output "NTLMv1: Could not perform this check (Access Denied)"
+} catch {
+    Add-Result "NTLMv1 on Clients" "Not found" "Info" ""
+}
+
+# -------------------
+# 10. WSUS Server
+# -------------------
+try {
+    $wsus = (Get-ItemProperty -Path "HKLM:\Software\Policies\Microsoft\Windows\WindowsUpdate").WUServer
+    if ($wsus -like "http://*") {
+        Add-Result "WSUS Server" $wsus "High" "Check ARTE for exploit"
+    } else {
+        Add-Result "WSUS Server" $wsus "Info" ""
+    }
+} catch [System.UnauthorizedAccessException] {
+        Write-Output "WSUS: Could not perform this check (Access Denied)"
+} catch {
+    Add-Result "WSUS Server" "Not found" "Info" ""
+}
+
+# -------------------
+# 11. NetBIOS over TCPIP
+# -------------------
+$netbiosOutput = ipconfig /all | Out-String
+if ($netbiosOutput -match "NetBIOS over Tcpip.*?:.*?Enabled") {
+    Add-Result "NetBIOS over TCPIP" "Enabled" "Medium" ""
+} else {
+    Add-Result "NetBIOS over TCPIP" "Disabled" "Info" ""
+}
+
+# -------------------
+# 12. LLMNR
+# -------------------
+try {
+    $llmnr = Get-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\DNSClient" -Name EnableMulticast
+    if ($llmnr.EnableMulticast -ne 0) {
+        Add-Result "LLMNR" $llmnr.EnableMulticast "Medium" ""
+    } else {
+        Add-Result "LLMNR" 0 "Info" ""
+    }
+} catch [System.UnauthorizedAccessException] {
+        Write-Output "LLMNR: Could not perform this check (Access Denied)"
+} catch {
+    Add-Result "LLMNR" "Not found" "Medium" ""
+}
+
+# -------------------
+# 13. mDNS
+# -------------------
+try {
+    $mdns = Get-ItemProperty -Path "HKLM:\Software\Policies\Microsoft\Windows NT\DNSClient" -Name EnableMDNS
+    if ($mdns.EnableMDNS -ne 0) {
+        Add-Result "mDNS" $mdns.EnableMDNS "Medium" "Careful, confirm this manually! Not sure if the reg key from ARTE is correct"
+    } else {
+        Add-Result "mDNS" 0 "Info" ""
+    }
+} catch [System.UnauthorizedAccessException] {
+        Write-Output "mDNS: Could not perform this check (Access Denied)"
+} catch {
+    Add-Result "mDNS" "Not found" "Medium" "Careful, confirm this manually! Not sure if the reg key from ARTE is correct"
+}
+
+# -------------------
+# Export to CSV
+# -------------------
+$results | Export-Csv -Path $csvPath -NoTypeInformation -Encoding UTF8
+
+# Export UAC settings
+try {
+    secedit /export /areas SECURITYPOLICY /cfg .\UAC.txt
+    Write-Output "UAC security settings exported to .\UAC.txt"
+} catch {
+    Write-Output "UAC export: Could not perform this action ($($_.Exception.Message))"
+}
+Write-Output "All checks done"
+Write-Output "CSV written to $csvPath"
+Write-Output "UAC written to UAC.txt"
