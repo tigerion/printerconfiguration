@@ -8,12 +8,42 @@
     detail (including analyst notes/comments) using paginated requests, and exports results to
     CSV and/or JSON.
 
+    CONFIG FILE SUPPORT
+    -------------------
+    Any parameter can be stored in a JSON config file to avoid retyping on every run.
+    By default the script looks for "eset-config.json" in the same directory as the script.
+    Use -ConfigFile to specify a different path.
+
+    Priority order (highest to lowest):
+        1. Explicit command-line argument      -Server "x"
+        2. Config file value                   { "Server": "x" }
+        3. Built-in script default             (e.g. PageSize = 100)
+
+    This means you can set permanent defaults in the config and still override any individual
+    value on the command line for a single run without editing the file.
+
+    Passwords in the config are stored as a DPAPI-encrypted Base64 string (Windows only).
+    Use -SavePassword to encrypt and write your password to the config file.
+    On non-Windows systems (PS 7+ on Linux/macOS) plaintext passwords are not supported in
+    the config for security reasons — you will always be prompted interactively.
+
+    GENERATE A CONFIG FILE
+    ----------------------
+    Run with -GenerateConfig to write a template config to disk:
+        .\Export-EsetInspectDetections.ps1 -GenerateConfig
+        .\Export-EsetInspectDetections.ps1 -GenerateConfig -ConfigFile "C:\Tools\my-eset.json"
+
+    SAVE YOUR PASSWORD TO THE CONFIG
+    ---------------------------------
+        .\Export-EsetInspectDetections.ps1 -ConfigFile ".\eset-config.json" -SavePassword
+
     The list endpoint (GET /api/v1/detections) is called first with pagination. Then the detail
     endpoint (GET /api/v1/detections/{id}) is called per-detection to retrieve fields only
     available there: note (analyst comment), handled, processPath, moduleFirstSeenLocally,
     moduleLastExecutedLocally.
 
     Robustness features:
+      - Config file with DPAPI-encrypted password storage (Windows)
       - Parameter validation with meaningful error messages
       - -DaysBack convenience parameter (auto-builds creationTime filter)
       - -DaysBack and -Filter are mutually exclusive (validated at runtime)
@@ -32,6 +62,22 @@
       - Emergency run-log saved on any fatal error
       - Proper exit codes: 0 = success / no results, 1 = error
 
+.PARAMETER ConfigFile
+    Path to a JSON config file. Defaults to "eset-config.json" in the script directory.
+    If the file does not exist the script continues using only command-line arguments and defaults.
+
+.PARAMETER GenerateConfig
+    Write a template config file to disk (at -ConfigFile path) and exit.
+    Existing files will NOT be overwritten unless -Force is also specified.
+
+.PARAMETER SavePassword
+    Encrypt the password (prompted securely) using Windows DPAPI and save it to the config file.
+    The encrypted value is tied to the current Windows user account and machine.
+    Exits after saving — does not run an export.
+
+.PARAMETER Force
+    Allow -GenerateConfig to overwrite an existing config file.
+
 .PARAMETER Server
     FQDN or IP of the ESET Inspect On-Prem server. Do not include https:// or trailing slash.
     Examples: inspect.corp.local   /   192.168.1.10
@@ -42,6 +88,7 @@
 .PARAMETER Password
     Optional. If omitted you are prompted with a masked secure input (recommended).
     Avoid passing on the command line — it appears in shell history.
+    Can be stored encrypted in the config file via -SavePassword.
 
 .PARAMETER Domain
     Set to $true when authenticating with a domain account. Default: $false
@@ -87,29 +134,27 @@
     Set to $false in production environments with valid certificates.
 
 .EXAMPLE
-    # Interactive — prompts for password securely
-    .\Export-EsetInspectDetections.ps1 -Server "inspect.corp.local" -Username "Administrator"
+    # Generate a template config file, fill it in, then run with no arguments
+    .\Export-EsetInspectDetections.ps1 -GenerateConfig
+    .\Export-EsetInspectDetections.ps1
 
 .EXAMPLE
-    # Last 30 days only
-    .\Export-EsetInspectDetections.ps1 -Server "inspect.corp.local" -Username "admin" -DaysBack 30
+    # Save your password encrypted into the config (run once, then never type it again)
+    .\Export-EsetInspectDetections.ps1 -SavePassword
+
+.EXAMPLE
+    # Use a named config for a different environment, override just the filter on this run
+    .\Export-EsetInspectDetections.ps1 -ConfigFile ".\prod-eset.json" -DaysBack 7
+
+.EXAMPLE
+    # Interactive — prompts for password securely (no config file)
+    .\Export-EsetInspectDetections.ps1 -Server "inspect.corp.local" -Username "Administrator"
 
 .EXAMPLE
     # Unresolved detections, last 7 days, CSV only, custom output folder
     $since = (Get-Date).AddDays(-7).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
-    .\Export-EsetInspectDetections.ps1 -Server "192.168.1.10" -Username "admin" `
-        -Filter "resolved eq false and creationTime ge $since" `
+    .\Export-EsetInspectDetections.ps1 -Filter "resolved eq false and creationTime ge $since" `
         -ExportFormat CSV -OutputPath "C:\Reports"
-
-.EXAMPLE
-    # Fast export — skip per-detection detail fetch (no notes, much faster for huge sets)
-    .\Export-EsetInspectDetections.ps1 -Server "inspect.corp.local" -Username "admin" `
-        -FetchDetails $false -DaysBack 7
-
-.EXAMPLE
-    # Domain account, slower/safer throttle delay for large environments
-    .\Export-EsetInspectDetections.ps1 -Server "inspect.corp.local" -Username "CORP\svc_eset" `
-        -Domain $true -DetailDelayMs 200 -MaxRetries 5
 
 .NOTES
     API reference : https://help.eset.com/ei_navigate/2.5/en-US/rest_api_detections.html
@@ -117,69 +162,82 @@
     Exit codes    : 0 = success (or no detections found), 1 = error
 #>
 
-[CmdletBinding(SupportsShouldProcess)]
+[CmdletBinding(SupportsShouldProcess, DefaultParameterSetName = "Run")]
 param(
-    [Parameter(Mandatory = $true, HelpMessage = "FQDN or IP of the ESET Inspect On-Prem server")]
-    [ValidateNotNullOrEmpty()]
-    [string]$Server,
+    # ── Config file control ───────────────────────────────────────────────────
+    [Parameter(ParameterSetName = "Run",            Mandatory = $false)]
+    [Parameter(ParameterSetName = "GenerateConfig", Mandatory = $false)]
+    [Parameter(ParameterSetName = "SavePassword",   Mandatory = $false)]
+    [string]$ConfigFile = "",
 
-    [Parameter(Mandatory = $true, HelpMessage = "API username")]
-    [ValidateNotNullOrEmpty()]
-    [string]$Username,
+    [Parameter(ParameterSetName = "GenerateConfig", Mandatory = $true)]
+    [switch]$GenerateConfig,
 
-    [Parameter(Mandatory = $false)]
+    [Parameter(ParameterSetName = "SavePassword",   Mandatory = $true)]
+    [switch]$SavePassword,
+
+    [Parameter(ParameterSetName = "GenerateConfig", Mandatory = $false)]
+    [switch]$Force,
+
+    # ── Connection ────────────────────────────────────────────────────────────
+    [Parameter(ParameterSetName = "Run", Mandatory = $false)]
+    [string]$Server = "",
+
+    [Parameter(ParameterSetName = "Run", Mandatory = $false)]
+    [string]$Username = "",
+
+    [Parameter(ParameterSetName = "Run", Mandatory = $false)]
     [string]$Password = "",
 
-    [Parameter(Mandatory = $false)]
-    [bool]$Domain = $false,
+    [Parameter(ParameterSetName = "Run", Mandatory = $false)]
+    [object]$Domain = $null,          # $null = "not provided by user"
 
-    [Parameter(Mandatory = $false)]
-    [ValidateScript({
-        if ($_ -and -not (Test-Path $_ -IsValid)) {
-            throw "OutputPath '$_' is not a valid filesystem path."
-        }
-        $true
-    })]
-    [string]$OutputPath = (Get-Location).Path,
+    # ── Export settings ───────────────────────────────────────────────────────
+    [Parameter(ParameterSetName = "Run", Mandatory = $false)]
+    [string]$OutputPath = "",
 
-    [Parameter(Mandatory = $false)]
-    [ValidateSet("CSV", "JSON", "Both")]
-    [string]$ExportFormat = "Both",
+    [Parameter(ParameterSetName = "Run", Mandatory = $false)]
+    [ValidateSet("CSV", "JSON", "Both", "")]
+    [string]$ExportFormat = "",
 
-    [Parameter(Mandatory = $false)]
-    [ValidateRange(1, 36500)]
-    [int]$DaysBack = 0,
+    [Parameter(ParameterSetName = "Run", Mandatory = $false)]
+    [ValidateRange(0, 36500)]
+    [int]$DaysBack = -1,              # -1 = "not provided by user"
 
-    [Parameter(Mandatory = $false)]
+    [Parameter(ParameterSetName = "Run", Mandatory = $false)]
     [string]$Filter = "",
 
-    [Parameter(Mandatory = $false)]
+    # ── Tuning ────────────────────────────────────────────────────────────────
+    [Parameter(ParameterSetName = "Run", Mandatory = $false)]
     [ValidateRange(1, 1000)]
-    [int]$PageSize = 100,
+    [int]$PageSize = -1,              # -1 = "not provided by user"
 
-    [Parameter(Mandatory = $false)]
-    [bool]$FetchDetails = $true,
+    [Parameter(ParameterSetName = "Run", Mandatory = $false)]
+    [object]$FetchDetails = $null,    # $null = "not provided by user"
 
-    [Parameter(Mandatory = $false)]
-    [ValidateRange(0, 60000)]
-    [int]$DetailDelayMs = 50,
+    [Parameter(ParameterSetName = "Run", Mandatory = $false)]
+    [ValidateRange(-1, 60000)]
+    [int]$DetailDelayMs = -1,         # -1 = "not provided by user"
 
-    [Parameter(Mandatory = $false)]
-    [ValidateRange(1, 10)]
-    [int]$MaxRetries = 3,
+    [Parameter(ParameterSetName = "Run", Mandatory = $false)]
+    [ValidateRange(-1, 10)]
+    [int]$MaxRetries = -1,            # -1 = "not provided by user"
 
-    [Parameter(Mandatory = $false)]
-    [bool]$SkipCertificateCheck = $true
+    [Parameter(ParameterSetName = "Run", Mandatory = $false)]
+    [object]$SkipCertificateCheck = $null   # $null = "not provided by user"
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 # ── Script-scoped state ──────────────────────────────────────────────────────
-$script:RunStart  = Get-Date
-$script:AuthTime  = $null
-$script:ExitCode  = 0
-$script:RunLog    = [System.Collections.Generic.List[hashtable]]::new()
+$script:RunStart = Get-Date
+$script:AuthTime = $null
+$script:ExitCode = 0
+$script:RunLog   = [System.Collections.Generic.List[hashtable]]::new()
+
+# Resolve the default config path (same directory as the script)
+$script:DefaultConfigPath = Join-Path $PSScriptRoot "eset-config.json"
 
 #region ── Logging ───────────────────────────────────────────────────────────────
 
@@ -203,10 +261,199 @@ function Write-Log {
 
 #endregion
 
+#region ── Config file ───────────────────────────────────────────────────────────
+
+# Template written by -GenerateConfig
+$script:ConfigTemplate = [ordered]@{
+    "_comment"             = "ESET Inspect On-Prem Detection Exporter — config file. All fields are optional; command-line arguments always override these values."
+    "Server"               = ""
+    "Username"             = ""
+    "EncryptedPassword"    = ""
+    "_passwordComment"     = "Do not edit EncryptedPassword manually. Run the script with -SavePassword to set it."
+    "Domain"               = $false
+    "OutputPath"           = ""
+    "ExportFormat"         = "Both"
+    "DaysBack"             = 0
+    "Filter"               = ""
+    "PageSize"             = 100
+    "FetchDetails"         = $true
+    "DetailDelayMs"        = 50
+    "MaxRetries"           = 3
+    "SkipCertificateCheck" = $true
+}
+
+function Get-ConfigPath {
+    if ($ConfigFile -ne "") { return $ConfigFile }
+    return $script:DefaultConfigPath
+}
+
+function Invoke-GenerateConfig {
+    $path = Get-ConfigPath
+    if ((Test-Path $path) -and -not $Force) {
+        Write-Host "Config file already exists: $path" -ForegroundColor Yellow
+        Write-Host "Use -Force to overwrite it." -ForegroundColor Yellow
+        exit 0
+    }
+    $script:ConfigTemplate | ConvertTo-Json -Depth 5 |
+        Out-File -FilePath $path -Encoding UTF8
+    Write-Host "Config template written to: $path" -ForegroundColor Green
+    Write-Host "Edit the file, then run the script with no arguments." -ForegroundColor Cyan
+    exit 0
+}
+
+function Invoke-SavePassword {
+    # DPAPI is Windows-only
+    if (-not $IsWindows -and $PSVersionTable.PSVersion.Major -ge 6) {
+        Write-Host "DPAPI password encryption is only supported on Windows." -ForegroundColor Red
+        Write-Host "On Linux/macOS you will be prompted for your password on each run." -ForegroundColor Yellow
+        exit 1
+    }
+
+    $path = Get-ConfigPath
+
+    # Load existing config or start with template
+    $cfg = if (Test-Path $path) {
+        Get-Content $path -Raw | ConvertFrom-Json
+    } else {
+        $script:ConfigTemplate | ConvertTo-Json -Depth 5 | ConvertFrom-Json
+    }
+
+    $secPwd = Read-Host -Prompt "Enter password to encrypt and save" -AsSecureString
+    $bstr   = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($secPwd)
+    $plain  = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr)
+    [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
+
+    if ([string]::IsNullOrWhiteSpace($plain)) {
+        Write-Host "Password cannot be empty." -ForegroundColor Red
+        exit 1
+    }
+
+    # Encrypt with DPAPI (current user scope — only decryptable by same user on same machine)
+    $bytes     = [System.Text.Encoding]::UTF8.GetBytes($plain)
+    $encrypted = [System.Security.Cryptography.ProtectedData]::Protect(
+        $bytes, $null,
+        [System.Security.Cryptography.DataProtectionScope]::CurrentUser
+    )
+    $encoded = [Convert]::ToBase64String($encrypted)
+
+    # Write back — preserve all existing keys, just update EncryptedPassword
+    $cfg | Add-Member -MemberType NoteProperty -Name "EncryptedPassword" -Value $encoded -Force
+    $cfg | ConvertTo-Json -Depth 5 | Out-File -FilePath $path -Encoding UTF8
+
+    # Zero plaintext
+    $plain = "x" * $plain.Length; $plain = ""
+
+    Write-Host "Encrypted password saved to: $path" -ForegroundColor Green
+    Write-Host "The password is encrypted with DPAPI and can only be decrypted by this Windows user account on this machine." -ForegroundColor Cyan
+    exit 0
+}
+
+function Read-Config {
+    <#
+    Load the JSON config file and return a hashtable of values.
+    Returns an empty hashtable if the file does not exist.
+    Decrypts EncryptedPassword (DPAPI) if present and populates the Password key.
+    #>
+    $path = Get-ConfigPath
+
+    if (-not (Test-Path $path)) {
+        if ($ConfigFile -ne "") {
+            # User explicitly specified a file that doesn't exist — warn them
+            Write-Log "Config file not found: $path" "WARN"
+        }
+        return @{}
+    }
+
+    Write-Log "Loading config from: $path"
+
+    $raw = $null
+    try {
+        $raw = Get-Content $path -Raw -ErrorAction Stop | ConvertFrom-Json
+    } catch {
+        throw "Failed to parse config file '$path': $_"
+    }
+
+    $cfg = @{}
+
+    # Map each known key from the JSON object into the hashtable
+    foreach ($key in @("Server","Username","Domain","OutputPath","ExportFormat",
+                        "DaysBack","Filter","PageSize","FetchDetails",
+                        "DetailDelayMs","MaxRetries","SkipCertificateCheck")) {
+        if ($null -ne $raw.$key -and "$($raw.$key)" -ne "") {
+            $cfg[$key] = $raw.$key
+        }
+    }
+
+    # Decrypt password if present
+    if (-not [string]::IsNullOrWhiteSpace($raw.EncryptedPassword)) {
+        try {
+            if (-not $IsWindows -and $PSVersionTable.PSVersion.Major -ge 6) {
+                Write-Log "EncryptedPassword found in config but DPAPI is not available on this OS. You will be prompted for your password." "WARN"
+            } else {
+                $bytes = [Convert]::FromBase64String($raw.EncryptedPassword)
+                $decrypted = [System.Security.Cryptography.ProtectedData]::Unprotect(
+                    $bytes, $null,
+                    [System.Security.Cryptography.DataProtectionScope]::CurrentUser
+                )
+                $cfg["Password"] = [System.Text.Encoding]::UTF8.GetString($decrypted)
+                Write-Log "Encrypted password loaded from config." "OK"
+            }
+        } catch {
+            Write-Log "Failed to decrypt EncryptedPassword from config (wrong user/machine?): $_" "WARN"
+            Write-Log "You will be prompted for your password interactively." "WARN"
+        }
+    }
+
+    Write-Log "Config loaded. Keys present: $($cfg.Keys -join ', ')" "OK"
+    return $cfg
+}
+
+function Merge-Config {
+    <#
+    Apply config-file values for any setting the user did NOT explicitly supply on the command line.
+    Then apply built-in defaults for anything still unset.
+
+    "Not supplied" detection:
+        string  -> ""  (empty string is the PowerShell default for optional string params)
+        int     -> -1  (sentinel; 0 is a valid value for DaysBack)
+        bool    -> $null (object type used so we can distinguish "not supplied" from $false)
+    #>
+    param([hashtable]$Cfg)
+
+    # ── Helper: pick first non-null/non-sentinel value from: CLI arg, config, default ──
+    function Resolve-Str  { param($cli, $key, $default) if ($cli -ne "")  { $cli } elseif ($Cfg.ContainsKey($key) -and $Cfg[$key] -ne "") { $Cfg[$key] } else { $default } }
+    function Resolve-Int  { param($cli, $key, $default) if ($cli -ne -1)  { $cli } elseif ($Cfg.ContainsKey($key))                        { [int]$Cfg[$key] }   else { $default } }
+    function Resolve-Bool { param($cli, $key, $default) if ($null -ne $cli -and $cli -isnot [string]) { [bool]$cli } elseif ($Cfg.ContainsKey($key)) { [bool]$Cfg[$key] } else { $default } }
+
+    $script:cfg_Server               = Resolve-Str  $Server               "Server"               ""
+    $script:cfg_Username             = Resolve-Str  $Username             "Username"             ""
+    $script:cfg_Password             = Resolve-Str  $Password             "Password"             ""
+    $script:cfg_Domain               = Resolve-Bool $Domain               "Domain"               $false
+    $script:cfg_OutputPath           = Resolve-Str  $OutputPath           "OutputPath"           (Get-Location).Path
+    $script:cfg_ExportFormat         = Resolve-Str  $ExportFormat         "ExportFormat"         "Both"
+    $script:cfg_DaysBack             = Resolve-Int  $DaysBack             "DaysBack"             0
+    $script:cfg_Filter               = Resolve-Str  $Filter               "Filter"               ""
+    $script:cfg_PageSize             = Resolve-Int  $PageSize             "PageSize"             100
+    $script:cfg_FetchDetails         = Resolve-Bool $FetchDetails         "FetchDetails"         $true
+    $script:cfg_DetailDelayMs        = Resolve-Int  $DetailDelayMs        "DetailDelayMs"        50
+    $script:cfg_MaxRetries           = Resolve-Int  $MaxRetries           "MaxRetries"           3
+    $script:cfg_SkipCertificateCheck = Resolve-Bool $SkipCertificateCheck "SkipCertificateCheck" $true
+
+    # Validate ExportFormat after merge (can't use [ValidateSet] on merged value)
+    if ($script:cfg_ExportFormat -notin @("CSV","JSON","Both")) {
+        throw "ExportFormat must be CSV, JSON, or Both. Got: '$($script:cfg_ExportFormat)'"
+    }
+    # Validate PageSize range after merge
+    if ($script:cfg_PageSize -lt 1 -or $script:cfg_PageSize -gt 1000) {
+        throw "PageSize must be between 1 and 1000. Got: $($script:cfg_PageSize)"
+    }
+}
+
+#endregion
+
 #region ── TLS ───────────────────────────────────────────────────────────────────
 
 function Enable-TlsBypass {
-    # PS 5.1 requires a custom ICertificatePolicy; PS 6+ uses -SkipCertificateCheck per-call
     if ($PSVersionTable.PSVersion.Major -lt 6) {
         if (-not ([System.Management.Automation.PSTypeName]"EsetTrustAll").Type) {
             Add-Type -TypeDefinition @"
@@ -220,7 +467,6 @@ public class EsetTrustAll : ICertificatePolicy {
         }
         [System.Net.ServicePointManager]::CertificatePolicy = New-Object EsetTrustAll
     }
-    # Ensure TLS 1.2 is enabled — many servers have TLS 1.0/1.1 disabled
     $needed = [System.Net.SecurityProtocolType]::Tls12
     if (-not ([System.Net.ServicePointManager]::SecurityProtocol -band $needed)) {
         [System.Net.ServicePointManager]::SecurityProtocol =
@@ -234,7 +480,6 @@ public class EsetTrustAll : ICertificatePolicy {
 
 function Test-ServerReachable {
     param([string]$Hostname)
-
     Write-Log "Pre-flight: DNS resolution for '$Hostname'..."
     try {
         $addrs = [System.Net.Dns]::GetHostAddresses($Hostname) |
@@ -244,12 +489,11 @@ function Test-ServerReachable {
         Write-Log "DNS resolution failed for '$Hostname': $_" "ERROR"
         return $false
     }
-
     Write-Log "Pre-flight: TCP port 443 connectivity test..."
     try {
         $tcp   = New-Object System.Net.Sockets.TcpClient
         $async = $tcp.BeginConnect($Hostname, 443, $null, $null)
-        $ok    = $async.AsyncWaitHandle.WaitOne(5000)   # 5-second timeout
+        $ok    = $async.AsyncWaitHandle.WaitOne(5000)
         $tcp.Close()
         if (-not $ok) {
             Write-Log "TCP 443 connection to '$Hostname' timed out (5 s)." "ERROR"
@@ -266,17 +510,15 @@ function Test-ServerReachable {
 function Test-FilterSyntax {
     param([string]$F)
     if (-not $F) { return }
-
     $allowedFields = @("id", "resolved", "creationTime")
     $allowedOps    = @("eq", "ne", "gt", "ge", "lt", "le", "and", "or", "not", "true", "false")
     $tokens        = [regex]::Matches($F, '[a-zA-Z]+') | ForEach-Object { $_.Value }
     $unknowns      = $tokens | Where-Object { $_ -notin $allowedOps -and $_ -notin $allowedFields }
-
     if ($unknowns) {
         Write-Log ("Filter pre-validation WARNING: unrecognised token(s): " +
                    "'$($unknowns -join "', '")'." +
                    " Allowed filter fields: $($allowedFields -join ', ')." +
-                   " Proceeding — the server API will reject an invalid expression.") "WARN"
+                   " Proceeding — the server will reject an invalid expression.") "WARN"
     } else {
         Write-Log "Filter expression pre-validation passed." "OK"
     }
@@ -284,7 +526,6 @@ function Test-FilterSyntax {
 
 function Assert-OutputWritable {
     param([string]$Dir)
-
     if (-not (Test-Path $Dir)) {
         Write-Log "Output directory does not exist — creating: $Dir"
         try {
@@ -294,7 +535,6 @@ function Assert-OutputWritable {
             throw "Failed to create output directory '$Dir': $_"
         }
     }
-
     $probe = Join-Path $Dir ".eset_write_probe_$PID"
     try {
         [System.IO.File]::WriteAllText($probe, "ok")
@@ -310,13 +550,7 @@ function Assert-OutputWritable {
 #region ── API core (with retry) ─────────────────────────────────────────────────
 
 function New-ApiSplat {
-    # Centralised splat builder so every call gets TLS bypass and content-type consistently
-    param(
-        [string]   $Uri,
-        [string]   $Method  = "GET",
-        [hashtable]$Headers = @{},
-        [object]   $Body    = $null
-    )
+    param([string]$Uri, [string]$Method = "GET", [hashtable]$Headers = @{}, [object]$Body = $null)
     $s = @{
         Uri             = $Uri
         Method          = $Method
@@ -324,74 +558,50 @@ function New-ApiSplat {
         ContentType     = "application/json"
         UseBasicParsing = $true
     }
-    if ($null -ne $Body) {
-        $s["Body"] = ($Body | ConvertTo-Json -Depth 10 -Compress)
-    }
-    if ($SkipCertificateCheck -and $PSVersionTable.PSVersion.Major -ge 6) {
+    if ($null -ne $Body) { $s["Body"] = ($Body | ConvertTo-Json -Depth 10 -Compress) }
+    if ($script:cfg_SkipCertificateCheck -and $PSVersionTable.PSVersion.Major -ge 6) {
         $s["SkipCertificateCheck"] = $true
     }
     return $s
 }
 
 function Invoke-ApiCall {
-    <#
-    Wraps Invoke-RestMethod with retry + back-off.
-    Retries on : 429, 5xx, connection failures (status 0)
-    Gives up on: 4xx (except 429) — these are client errors and won't self-heal
-    Back-off   : exponential (1s, 2s, 4s...) honouring Retry-After on 429
-    #>
-    param(
-        [string]   $Uri,
-        [string]   $Method  = "GET",
-        [hashtable]$Headers = @{},
-        [object]   $Body    = $null
-    )
-
+    param([string]$Uri, [string]$Method = "GET", [hashtable]$Headers = @{}, [object]$Body = $null)
     $attempt = 0
     while ($true) {
         $attempt++
         try {
             $splat = New-ApiSplat -Uri $Uri -Method $Method -Headers $Headers -Body $Body
             return Invoke-RestMethod @splat
-
         } catch [System.Net.WebException] {
             $webEx    = $_.Exception
             $response = $webEx.Response
             $status   = if ($response) { [int]$response.StatusCode } else { 0 }
-
-            # Read response body for diagnostic detail
-            $body = ""
+            $body     = ""
             if ($response) {
                 try {
                     $sr   = New-Object System.IO.StreamReader($response.GetResponseStream())
                     $body = $sr.ReadToEnd(); $sr.Close()
                 } catch { }
             }
-
             $isRetryable = ($status -eq 429) -or ($status -ge 500) -or ($status -eq 0)
-
-            if (-not $isRetryable -or $attempt -ge $MaxRetries) {
+            if (-not $isRetryable -or $attempt -ge $script:cfg_MaxRetries) {
                 $msg = "API call failed (HTTP $status) — URI: $Uri"
                 if ($body) { $msg += "`n  Server response: $body" }
                 throw $msg
             }
-
-            # Honour Retry-After if present (429), otherwise exponential back-off
             $retryAfterMs = 0
             if ($response -and $response.Headers["Retry-After"]) {
                 $ra = 0
-                if ([int]::TryParse($response.Headers["Retry-After"], [ref]$ra)) {
-                    $retryAfterMs = $ra * 1000
-                }
+                if ([int]::TryParse($response.Headers["Retry-After"], [ref]$ra)) { $retryAfterMs = $ra * 1000 }
             }
             $backoffMs = [int][Math]::Max($retryAfterMs, ([Math]::Pow(2, $attempt - 1) * 1000))
-            Write-Log "  Attempt $attempt/$MaxRetries failed (HTTP $status). Retrying in ${backoffMs}ms..." "WARN"
+            Write-Log "  Attempt $attempt/$($script:cfg_MaxRetries) failed (HTTP $status). Retrying in ${backoffMs}ms..." "WARN"
             Start-Sleep -Milliseconds $backoffMs
-
         } catch {
-            if ($attempt -ge $MaxRetries) { throw }
+            if ($attempt -ge $script:cfg_MaxRetries) { throw }
             $backoffMs = [int]([Math]::Pow(2, $attempt - 1) * 1000)
-            Write-Log "  Attempt $attempt/$MaxRetries error: $_. Retrying in ${backoffMs}ms..." "WARN"
+            Write-Log "  Attempt $attempt/$($script:cfg_MaxRetries) error: $_. Retrying in ${backoffMs}ms..." "WARN"
             Start-Sleep -Milliseconds $backoffMs
         }
     }
@@ -403,11 +613,8 @@ function Invoke-ApiCall {
 
 function Invoke-Authenticate {
     param([string]$Pwd)
-
-    $splat = New-ApiSplat -Uri "https://$Server/api/v1/authenticate" -Method "PUT"
-    # Override Body manually — we need Invoke-WebRequest (not RestMethod) to access headers
-    $splat["Body"] = (@{ username = $Username; password = $Pwd; domain = $Domain } | ConvertTo-Json)
-
+    $splat = New-ApiSplat -Uri "https://$($script:cfg_Server)/api/v1/authenticate" -Method "PUT"
+    $splat["Body"] = (@{ username = $script:cfg_Username; password = $Pwd; domain = $script:cfg_Domain } | ConvertTo-Json)
     $resp = $null
     try {
         $resp = Invoke-WebRequest @splat
@@ -421,15 +628,13 @@ function Invoke-Authenticate {
                 $errBody = $sr.ReadToEnd(); $sr.Close()
             } catch { }
         }
-
         $hint = switch ($status) {
             401     { "Invalid username or password. Verify credentials and account status." }
             403     { "Account lacks API access. Check ESET Inspect user role/permissions." }
-            404     { "Authentication endpoint not found (HTTP 404). Verify the server address and that ESET Inspect is running on port 443." }
-            0       { "No response received from server. Check hostname, firewall rules, and that the ESET Inspect service is running." }
+            404     { "Authentication endpoint not found (HTTP 404). Verify server address and that ESET Inspect is running on port 443." }
+            0       { "No response received. Check hostname, firewall rules, and that the ESET Inspect service is running." }
             default { "Unexpected HTTP $status during authentication." }
         }
-
         $msg = "Authentication FAILED: $hint"
         if ($errBody) { $msg += " | Server said: $errBody" }
         throw $msg
@@ -437,29 +642,22 @@ function Invoke-Authenticate {
         throw "Authentication FAILED (unexpected error): $_"
     }
 
-    # ── Validate HTTP status ───────────────────────────────────────────────────
     if ($resp.StatusCode -ne 200) {
-        throw ("Authentication returned HTTP $($resp.StatusCode) — expected 200. " +
-               "The server accepted the connection but did not confirm login success.")
+        throw "Authentication returned HTTP $($resp.StatusCode) — expected 200."
     }
 
-    # ── Extract and validate the session token ────────────────────────────────
-    # PS 5.1 returns IDictionary; PS 7+ returns HttpResponseHeaders (may be string[])
     $token = $null
     try {
         $token = $resp.Headers["X-Security-Token"]
-        if ($token -is [System.Object[]]) { $token = $token[0] }   # PS 7 array unwrap
+        if ($token -is [System.Object[]]) { $token = $token[0] }
     } catch { }
 
     if ([string]::IsNullOrWhiteSpace($token)) {
         throw ("Authentication returned HTTP 200, but the X-Security-Token header is absent. " +
-               "Possible causes: a proxy is stripping response headers, the API path is wrong, " +
-               "or the server is running an API version incompatible with this script.")
+               "A proxy may be stripping headers, or the API path is incorrect.")
     }
-
     if ($token.Length -lt 16) {
-        throw ("X-Security-Token appears too short (length=$($token.Length)). " +
-               "The server may have returned an error in token form. Token value: '$token'")
+        throw "X-Security-Token appears too short (length=$($token.Length)). Value: '$token'"
     }
 
     Write-Log "Authentication SUCCESS — session token received (length=$($token.Length))." "OK"
@@ -468,112 +666,96 @@ function Invoke-Authenticate {
 }
 
 function Test-TokenAge {
-    # Warn once when approaching typical session expiry (~30 min)
-    if ($null -ne $script:AuthTime -and
-        ((Get-Date) - $script:AuthTime).TotalMinutes -gt 20) {
-        Write-Log ("Session token is over 20 minutes old. ESET Inspect sessions typically " +
-                   "expire around 30 minutes. If you see HTTP 401 errors, re-run the script.") "WARN"
-        $script:AuthTime = Get-Date   # reset so warning fires again after another 20 min
+    if ($null -ne $script:AuthTime -and ((Get-Date) - $script:AuthTime).TotalMinutes -gt 20) {
+        Write-Log "Session token is over 20 minutes old. If you see HTTP 401 errors, re-run the script." "WARN"
+        $script:AuthTime = Get-Date
     }
 }
 
 #endregion
 
-#region ── Detection field mappings ─────────────────────────────────────────────
+#region ── Detection helpers ─────────────────────────────────────────────────────
 
 $script:DetectionTypeMap = @{
-    0 = "UnknownAlarm"
-    1 = "RuleActivated"
-    2 = "MalwareFoundOnDisk"
-    3 = "MalwareFoundInMemory"
-    4 = "ExploitDetected"
-    5 = "FirewallDetection"
-    7 = "BlockedAddress"
-    8 = "CryptoBlockerDetection"
+    0 = "UnknownAlarm";    1 = "RuleActivated";        2 = "MalwareFoundOnDisk"
+    3 = "MalwareFoundInMemory"; 4 = "ExploitDetected"; 5 = "FirewallDetection"
+    7 = "BlockedAddress";  8 = "CryptoBlockerDetection"
 }
-
-$script:SignatureTypeMap = @{
-    90 = "Trusted"
-    80 = "Valid"
-    75 = "AdHoc"
-    70 = "None"
-    60 = "Invalid"
-}
+$script:SignatureTypeMap = @{ 90 = "Trusted"; 80 = "Valid"; 75 = "AdHoc"; 70 = "None"; 60 = "Invalid" }
 
 function Get-SeverityLabel([int]$Score) {
-    if ($Score -ge 70) { return "Threat"  }
+    if ($Score -ge 70) { return "Threat" }
     if ($Score -ge 40) { return "Warning" }
     return "Info"
+}
+
+function Get-Prop {
+    <#
+    .SYNOPSIS
+        Safely read a property from a PSCustomObject under Set-StrictMode -Version Latest.
+    .DESCRIPTION
+        StrictMode throws a PropertyNotFoundException when you access a property that does
+        not exist on an object. The ESET API does not guarantee every field is present in
+        every response (e.g. moduleFirstSeenLocally only appears in the detail endpoint,
+        and some fields are absent for certain detection types).
+
+        This helper returns $null for any missing or unreadable property instead of throwing,
+        keeping ConvertTo-FlatDetection safe regardless of what the API returns.
+    #>
+    param([PSCustomObject]$Obj, [string]$Name, $Default = $null)
+    if ($null -eq $Obj) { return $Default }
+    # PSObject.Properties is the StrictMode-safe way to test property existence
+    $prop = $Obj.PSObject.Properties[$Name]
+    if ($null -eq $prop) { return $Default }
+    $v = $prop.Value
+    if ($null -eq $v) { return $Default }
+    return $v
 }
 
 function ConvertTo-FlatDetection {
     param([PSCustomObject]$D)
 
-    # Safe coercions — bad or missing fields become -1/0, never throw
-    $typeId  = try { [int]$D.type }               catch { -1 }
-    $sigType = try { [int]$D.moduleSignatureType } catch { -1 }
-    $score   = try { [int]$D.severityScore }       catch {  0 }
+    # Numeric fields — coerce safely; missing or non-numeric becomes the sentinel default
+    $typeId  = try { [int](Get-Prop $D 'type'               -1) } catch { -1 }
+    $sigType = try { [int](Get-Prop $D 'moduleSignatureType' -1) } catch { -1 }
+    $score   = try { [int](Get-Prop $D 'severityScore'        0) } catch {  0 }
 
     [PSCustomObject]@{
-        # ── Identifiers ───────────────────────────────────────────────────────
-        id                        = $D.id
-        uuid                      = $D.uuid
-
-        # ── Timestamps ────────────────────────────────────────────────────────
-        creationTime              = $D.creationTime
-        moduleFirstSeenLocally    = $D.moduleFirstSeenLocally       # detail endpoint only
-        moduleLastExecutedLocally = $D.moduleLastExecutedLocally    # detail endpoint only
-
-        # ── Computer ──────────────────────────────────────────────────────────
-        computerId                = $D.computerId
-        computerName              = $D.computerName
-        computerUuid              = $D.computerUuid
-
-        # ── Rule ──────────────────────────────────────────────────────────────
-        ruleId                    = $D.ruleId
-        ruleUuid                  = $D.ruleUuid
-        ruleName                  = $D.ruleName
-
-        # ── Classification ────────────────────────────────────────────────────
+        id                        = Get-Prop $D 'id'
+        uuid                      = Get-Prop $D 'uuid'
+        creationTime              = Get-Prop $D 'creationTime'
+        moduleFirstSeenLocally    = Get-Prop $D 'moduleFirstSeenLocally'     # detail endpoint only
+        moduleLastExecutedLocally = Get-Prop $D 'moduleLastExecutedLocally'  # detail endpoint only
+        computerId                = Get-Prop $D 'computerId'
+        computerName              = Get-Prop $D 'computerName'
+        computerUuid              = Get-Prop $D 'computerUuid'
+        ruleId                    = Get-Prop $D 'ruleId'
+        ruleUuid                  = Get-Prop $D 'ruleUuid'
+        ruleName                  = Get-Prop $D 'ruleName'
         type                      = $typeId
-        typeLabel                 = if ($script:DetectionTypeMap.ContainsKey($typeId)) {
-                                        $script:DetectionTypeMap[$typeId]
-                                    } else { "Unknown($typeId)" }
-        severity                  = $D.severity
+        typeLabel                 = if ($script:DetectionTypeMap.ContainsKey($typeId)) { $script:DetectionTypeMap[$typeId] } else { "Unknown($typeId)" }
+        severity                  = Get-Prop $D 'severity'
         severityScore             = $score
         severityLabel             = Get-SeverityLabel $score
-        priority                  = $D.priority
-
-        # ── Status ────────────────────────────────────────────────────────────
-        resolved                  = $D.resolved
-        handled                   = $D.handled                      # detail endpoint only
-
-        # ── Threat ────────────────────────────────────────────────────────────
-        threatName                = $D.threatName
-        threatUri                 = $D.threatUri
-
-        # ── Process ───────────────────────────────────────────────────────────
-        processId                 = $D.processId
-        processUser               = $D.processUser
-        processCommandLine        = $D.processCommandLine
-        processPath               = $D.processPath                  # detail endpoint only
-
-        # ── Module / Executable ───────────────────────────────────────────────
-        moduleId                  = $D.moduleId
-        moduleName                = $D.moduleName
-        moduleSha1                = $D.moduleSha1
-        moduleSigner              = $D.moduleSigner
+        priority                  = Get-Prop $D 'priority'
+        resolved                  = Get-Prop $D 'resolved'
+        handled                   = Get-Prop $D 'handled'                    # detail endpoint only
+        threatName                = Get-Prop $D 'threatName'
+        threatUri                 = Get-Prop $D 'threatUri'
+        processId                 = Get-Prop $D 'processId'
+        processUser               = Get-Prop $D 'processUser'
+        processCommandLine        = Get-Prop $D 'processCommandLine'
+        processPath               = Get-Prop $D 'processPath'                # detail endpoint only
+        moduleId                  = Get-Prop $D 'moduleId'
+        moduleName                = Get-Prop $D 'moduleName'
+        moduleSha1                = Get-Prop $D 'moduleSha1'
+        moduleSigner              = Get-Prop $D 'moduleSigner'
         moduleSignatureType       = $sigType
-        moduleSignatureLabel      = if ($script:SignatureTypeMap.ContainsKey($sigType)) {
-                                        $script:SignatureTypeMap[$sigType]
-                                    } else { "Unknown($sigType)" }
-        moduleLgAge               = $D.moduleLgAge
-        moduleLgPopularity        = $D.moduleLgPopularity
-        moduleLgReputation        = $D.moduleLgReputation
-
-        # ── Analyst note / comment ─────────────────────────────────────────────
-        # Only populated when FetchDetails=$true (detail endpoint only)
-        note                      = $D.note
+        moduleSignatureLabel      = if ($script:SignatureTypeMap.ContainsKey($sigType)) { $script:SignatureTypeMap[$sigType] } else { "Unknown($sigType)" }
+        moduleLgAge               = Get-Prop $D 'moduleLgAge'
+        moduleLgPopularity        = Get-Prop $D 'moduleLgPopularity'
+        moduleLgReputation        = Get-Prop $D 'moduleLgReputation'
+        note                      = Get-Prop $D 'note'                       # detail endpoint only
     }
 }
 
@@ -582,14 +764,10 @@ function ConvertTo-FlatDetection {
 #region ── Output helpers ────────────────────────────────────────────────────────
 
 function Get-SafeOutputPath {
-    # Returns a path that does not already exist, appending _1, _2 ... if needed
     param([string]$Dir, [string]$Base, [string]$Ext)
     $candidate = Join-Path $Dir "$Base.$Ext"
     $counter   = 1
-    while (Test-Path $candidate) {
-        $candidate = Join-Path $Dir "${Base}_${counter}.$Ext"
-        $counter++
-    }
+    while (Test-Path $candidate) { $candidate = Join-Path $Dir "${Base}_${counter}.$Ext"; $counter++ }
     return $candidate
 }
 
@@ -606,30 +784,34 @@ function Save-RunLog {
 }
 
 function Export-Detections {
-    param(
-        [System.Collections.Generic.List[object]]$Data,
-        [string]$Base,
-        [string]$Dir,
-        [string]$Format,
-        [string]$Label = ""  # e.g. "PARTIAL" for emergency saves
-    )
+    param([System.Collections.Generic.List[object]]$Data, [string]$Base, [string]$Dir, [string]$Format, [string]$Label = "")
     if ($Data.Count -eq 0) { return }
-
-    if ($Format -in @("CSV", "Both")) {
+    $tag = if ($Label) { " [$Label]" } else { "" }
+    if ($Format -in @("CSV","Both")) {
         $path = Get-SafeOutputPath -Dir $Dir -Base $Base -Ext "csv"
         $Data | Export-Csv -Path $path -NoTypeInformation -Encoding UTF8
-        Write-Log "CSV$(if ($Label){" [$Label]"}) -> $path" "OK"
+        Write-Log "CSV$tag -> $path" "OK"
     }
-    if ($Format -in @("JSON", "Both")) {
+    if ($Format -in @("JSON","Both")) {
         $path = Get-SafeOutputPath -Dir $Dir -Base $Base -Ext "json"
         $Data | ConvertTo-Json -Depth 10 | Out-File -FilePath $path -Encoding UTF8
-        Write-Log "JSON$(if ($Label){" [$Label]"}) -> $path" "OK"
+        Write-Log "JSON$tag -> $path" "OK"
     }
 }
 
 #endregion
 
-#region ── Main ──────────────────────────────────────────────────────────────────
+#region ── Entry point ────────────────────────────────────────────────────────────
+
+# Handle utility modes before doing anything else
+if ($GenerateConfig) { Invoke-GenerateConfig }
+if ($SavePassword)   { Invoke-SavePassword   }
+
+# ── Load and merge config ────────────────────────────────────────────────────
+$fileCfg = Read-Config
+Merge-Config -Cfg $fileCfg
+
+# ── From here, use $script:cfg_* variables exclusively ──────────────────────
 
 $detailErrors  = 0
 $totalCount    = 0
@@ -644,247 +826,222 @@ try {
     # STEP 0 — Banner
     # ═══════════════════════════════════════════════════════════════
     Write-Log "======================================================"
-    Write-Log " ESET Inspect On-Prem -- Detection Exporter v2.0"
+    Write-Log " ESET Inspect On-Prem -- Detection Exporter v3.0"
     Write-Log " Started : $($script:RunStart.ToString('yyyy-MM-dd HH:mm:ss'))"
     Write-Log "======================================================"
 
     # ═══════════════════════════════════════════════════════════════
-    # STEP 1 — Resolve / validate parameters
+    # STEP 1 — Validate resolved settings
     # ═══════════════════════════════════════════════════════════════
 
-    # Mutually exclusive: -DaysBack and -Filter
-    if ($DaysBack -gt 0 -and $Filter -ne "") {
+    if ([string]::IsNullOrWhiteSpace($script:cfg_Server)) {
+        throw ("Server is required. Supply it via -Server, or set it in the config file at: " +
+               (Get-ConfigPath))
+    }
+    if ([string]::IsNullOrWhiteSpace($script:cfg_Username)) {
+        throw ("Username is required. Supply it via -Username, or set it in the config file at: " +
+               (Get-ConfigPath))
+    }
+
+    if ($script:cfg_DaysBack -gt 0 -and $script:cfg_Filter -ne "") {
         throw "-DaysBack and -Filter are mutually exclusive. Use one or the other, not both."
     }
-
-    # Build the OData filter automatically when -DaysBack is supplied
-    if ($DaysBack -gt 0) {
-        $since  = (Get-Date).ToUniversalTime().AddDays(-$DaysBack).ToString("yyyy-MM-ddTHH:mm:ssZ")
-        $Filter = "creationTime ge $since"
-        Write-Log "DaysBack $DaysBack -> filter: $Filter"
+    if ($script:cfg_DaysBack -gt 0) {
+        $since             = (Get-Date).ToUniversalTime().AddDays(-$script:cfg_DaysBack).ToString("yyyy-MM-ddTHH:mm:ssZ")
+        $script:cfg_Filter = "creationTime ge $since"
+        Write-Log "DaysBack=$($script:cfg_DaysBack) -> auto-filter: $($script:cfg_Filter)"
     }
 
-    Write-Log "Server        : $Server"
-    Write-Log "Username      : $Username"
-    Write-Log "Domain auth   : $Domain"
-    Write-Log "Filter        : $(if ($Filter) { $Filter } else { '(none — all detections)' })"
-    Write-Log "FetchDetails  : $FetchDetails"
-    Write-Log "ExportFormat  : $ExportFormat"
-    Write-Log "OutputPath    : $OutputPath"
-    Write-Log "PageSize      : $PageSize  |  MaxRetries: $MaxRetries  |  DetailDelayMs: $DetailDelayMs"
+    Write-Log "Config file   : $(Get-ConfigPath)"
+    Write-Log "Server        : $($script:cfg_Server)"
+    Write-Log "Username      : $($script:cfg_Username)"
+    Write-Log "Domain auth   : $($script:cfg_Domain)"
+    Write-Log "Filter        : $(if ($script:cfg_Filter) { $script:cfg_Filter } else { '(none — all detections)' })"
+    Write-Log "FetchDetails  : $($script:cfg_FetchDetails)"
+    Write-Log "ExportFormat  : $($script:cfg_ExportFormat)"
+    Write-Log "OutputPath    : $($script:cfg_OutputPath)"
+    Write-Log "PageSize      : $($script:cfg_PageSize)  |  MaxRetries: $($script:cfg_MaxRetries)  |  DetailDelayMs: $($script:cfg_DetailDelayMs)"
     Write-Log "------------------------------------------------------"
 
     # ═══════════════════════════════════════════════════════════════
     # STEP 2 — TLS
     # ═══════════════════════════════════════════════════════════════
-    if ($SkipCertificateCheck) {
+    if ($script:cfg_SkipCertificateCheck) {
         Enable-TlsBypass
         Write-Log "TLS certificate verification DISABLED (SkipCertificateCheck=true)." "WARN"
-        Write-Log "Set -SkipCertificateCheck `$false in production with valid certificates." "WARN"
     }
 
     # ═══════════════════════════════════════════════════════════════
-    # STEP 3 — OData filter pre-validation
+    # STEP 3 — Filter pre-validation
     # ═══════════════════════════════════════════════════════════════
-    Test-FilterSyntax -F $Filter
+    Test-FilterSyntax -F $script:cfg_Filter
 
     # ═══════════════════════════════════════════════════════════════
-    # STEP 4 — Output directory writability (fail early, before network I/O)
+    # STEP 4 — Output directory writability
     # ═══════════════════════════════════════════════════════════════
-    Assert-OutputWritable -Dir $OutputPath
+    Assert-OutputWritable -Dir $script:cfg_OutputPath
 
     # ═══════════════════════════════════════════════════════════════
-    # STEP 5 — Pre-flight: network reachability
+    # STEP 5 — Network pre-flight
     # ═══════════════════════════════════════════════════════════════
-    if (-not (Test-ServerReachable -Hostname $Server)) {
-        throw ("Server '$Server' is not reachable on TCP 443. " +
-               "Verify the hostname/IP, firewall rules, and that ESET Inspect is running.")
+    if (-not (Test-ServerReachable -Hostname $script:cfg_Server)) {
+        throw ("Server '$($script:cfg_Server)' is not reachable on TCP 443. " +
+               "Verify hostname/IP, firewall rules, and that ESET Inspect is running.")
     }
 
     # ═══════════════════════════════════════════════════════════════
-    # STEP 6 — Secure password prompt (if not supplied)
+    # STEP 6 — Password (prompt if not in config or CLI)
     # ═══════════════════════════════════════════════════════════════
-    if ([string]::IsNullOrEmpty($Password)) {
-        $secPwd   = Read-Host -Prompt "Password for '$Username'" -AsSecureString
-        $bstr     = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($secPwd)
-        $Password = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr)
+    if ([string]::IsNullOrEmpty($script:cfg_Password)) {
+        $secPwd              = Read-Host -Prompt "Password for '$($script:cfg_Username)'" -AsSecureString
+        $bstr                = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($secPwd)
+        $script:cfg_Password = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr)
         [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
+    } else {
+        Write-Log "Password sourced from config file (encrypted)." "OK"
     }
-    if ([string]::IsNullOrWhiteSpace($Password)) {
+    if ([string]::IsNullOrWhiteSpace($script:cfg_Password)) {
         throw "Password cannot be empty."
     }
 
     # ═══════════════════════════════════════════════════════════════
     # STEP 7 — Authenticate
     # ═══════════════════════════════════════════════════════════════
-    Write-Log "Authenticating as '$Username' on '$Server'..."
-    $token       = Invoke-Authenticate -Pwd $Password
-
-    # Zero the password string from memory — it is no longer needed
-    $Password    = "x" * $Password.Length
-    $Password    = ""
-
-    $authHeaders = @{ "Authorization" = "Bearer $token" }
-    $baseUrl     = "https://$Server"
+    Write-Log "Authenticating as '$($script:cfg_Username)' on '$($script:cfg_Server)'..."
+    $token               = Invoke-Authenticate -Pwd $script:cfg_Password
+    $script:cfg_Password = "x" * $script:cfg_Password.Length
+    $script:cfg_Password = ""
+    $authHeaders         = @{ "Authorization" = "Bearer $token" }
+    $baseUrl             = "https://$($script:cfg_Server)"
 
     # ═══════════════════════════════════════════════════════════════
-    # STEP 8 — Query total detection count
+    # STEP 8 — Total count
     # ═══════════════════════════════════════════════════════════════
     Write-Log "Querying total detection count..."
     $countQuery = "`$count=1"
-    if ($Filter) { $countQuery += "&`$filter=$([Uri]::EscapeDataString($Filter))" }
+    if ($script:cfg_Filter) { $countQuery += "&`$filter=$([Uri]::EscapeDataString($script:cfg_Filter))" }
 
     $countResp = Invoke-ApiCall -Uri "$baseUrl/api/v1/detections?$countQuery" -Headers $authHeaders
-
-    if ($null -eq $countResp) {
-        throw "Detection count API returned null. The server may have returned an empty response body."
+    if ($null -eq $countResp) { throw "Detection count API returned null." }
+    # PSObject.Properties is the StrictMode-safe way to check/read properties
+    $countProp = $countResp.PSObject.Properties['count']
+    if ($null -eq $countProp) {
+        throw "API response missing 'count' field. Raw: $($countResp | ConvertTo-Json -Compress -Depth 3)"
     }
-    if (-not ($countResp.PSObject.Properties.Name -contains 'count')) {
-        throw ("API response is missing the 'count' field. " +
-               "Possible API version mismatch or proxy interference. " +
-               "Raw response: $($countResp | ConvertTo-Json -Compress -Depth 3)")
-    }
-
-    $totalCount = [int]$countResp.count
+    $totalCount = [int]$countProp.Value
     Write-Log "Total detections matching filter: $totalCount" "OK"
 
     if ($totalCount -eq 0) {
-        Write-Log "No detections match the specified filter. Nothing to export." "WARN"
-        if ($Filter) { Write-Log "Active filter: $Filter" "WARN" }
+        Write-Log "No detections match the filter. Nothing to export." "WARN"
         exit 0
     }
 
     # ═══════════════════════════════════════════════════════════════
-    # STEP 9 — Paginate through the detection list
+    # STEP 9 — Paginate
     # ═══════════════════════════════════════════════════════════════
-    $pageCount = [Math]::Ceiling($totalCount / $PageSize)
-    Write-Log "Fetching $totalCount detection(s) across $pageCount page(s) (page size: $PageSize)..."
+    $pageCount = [Math]::Ceiling($totalCount / $script:cfg_PageSize)
+    Write-Log "Fetching $totalCount detection(s) across $pageCount page(s)..."
 
     for ($page = 0; $page -lt $pageCount; $page++) {
         Test-TokenAge
+        $skip  = $page * $script:cfg_PageSize
+        $query = "`$skip=$skip&`$top=$($script:cfg_PageSize)&`$orderBy=creationTime desc"
+        if ($script:cfg_Filter) { $query += "&`$filter=$([Uri]::EscapeDataString($script:cfg_Filter))" }
 
-        $skip  = $page * $PageSize
-        $query = "`$skip=$skip&`$top=$PageSize&`$orderBy=creationTime desc"
-        if ($Filter) { $query += "&`$filter=$([Uri]::EscapeDataString($Filter))" }
-
-        $pageResp = Invoke-ApiCall -Uri "$baseUrl/api/v1/detections?$query" -Headers $authHeaders
-
-        if ($null -eq $pageResp) {
-            Write-Log "Page $($page+1) returned null — skipping." "WARN"
+        $pageResp  = Invoke-ApiCall -Uri "$baseUrl/api/v1/detections?$query" -Headers $authHeaders
+        $valueProp = if ($null -ne $pageResp) { $pageResp.PSObject.Properties['value'] } else { $null }
+        if ($null -eq $valueProp -or $null -eq $valueProp.Value) {
+            Write-Log "Page $($page+1) returned no data — skipping." "WARN"
             continue
         }
-        if (-not ($pageResp.PSObject.Properties.Name -contains 'value') -or $null -eq $pageResp.value) {
-            Write-Log "Page $($page+1) has no 'value' array — skipping." "WARN"
-            continue
-        }
+        $allDetections.AddRange([object[]]$valueProp.Value)
 
-        $batch = [object[]]$pageResp.value
-        $allDetections.AddRange($batch)
-
-        $pct = [int](($page + 1) / $pageCount * 100)
         Write-Progress -Id 1 -Activity "Fetching detection list" `
-            -Status   "Page $($page+1) of $pageCount  |  $($allDetections.Count) collected so far" `
-            -PercentComplete $pct
+            -Status "$($page+1) of $pageCount pages  |  $($allDetections.Count) collected" `
+            -PercentComplete ([int](($page+1)/$pageCount*100))
     }
     Write-Progress -Id 1 -Activity "Fetching detection list" -Completed
-    Write-Log "List fetch complete: $($allDetections.Count) detection(s) collected." "OK"
+    Write-Log "List fetch complete: $($allDetections.Count) detection(s)." "OK"
 
-    if ($allDetections.Count -eq 0) {
-        Write-Log ("List pages returned 0 items despite count=$totalCount. " +
-                   "This may indicate a server/API issue.") "WARN"
-        exit 0
-    }
+    if ($allDetections.Count -eq 0) { Write-Log "0 detections returned despite count=$totalCount." "WARN"; exit 0 }
 
     # ═══════════════════════════════════════════════════════════════
-    # STEP 10 — Enrich with per-detection detail (for notes + extra fields)
+    # STEP 10 — Detail fetch
     # ═══════════════════════════════════════════════════════════════
-    if ($FetchDetails) {
-        Write-Log ("Fetching full detail per detection to capture analyst notes/comments " +
-                   "and detail-only fields: processPath, handled, moduleFirstSeen, moduleLastExecuted.")
-        Write-Log ("This makes 1 additional API call per detection ($($allDetections.Count) calls total). " +
-                   "Use -FetchDetails `$false to skip and export faster without notes.")
-
+    if ($script:cfg_FetchDetails) {
+        Write-Log "Fetching per-detection detail for analyst notes and extra fields..."
         $fetched = 0
         foreach ($det in $allDetections) {
             Test-TokenAge
             $fetched++
-
-            $pct = [int]($fetched / $allDetections.Count * 100)
+            # Get-Prop is StrictMode-safe — won't throw if 'id' is absent
+            $detId = Get-Prop $det 'id' '(unknown)'
             Write-Progress -Id 2 -Activity "Fetching detection details" `
-                -Status   "$fetched / $($allDetections.Count)  |  id=$($det.id)  |  errors=$detailErrors" `
-                -PercentComplete $pct
-
+                -Status "$fetched / $($allDetections.Count)  |  id=$detId  |  errors=$detailErrors" `
+                -PercentComplete ([int]($fetched/$allDetections.Count*100))
             try {
-                $detail = Invoke-ApiCall -Uri "$baseUrl/api/v1/detections/$($det.id)" -Headers $authHeaders
+                $detail = Invoke-ApiCall -Uri "$baseUrl/api/v1/detections/$detId" -Headers $authHeaders
                 $enriched.Add((ConvertTo-FlatDetection $detail))
             } catch {
                 $detailErrors++
-                Write-Log "  Detail fetch FAILED for id=$($det.id): $_ — using list data (note will be empty)." "WARN"
+                Write-Log "  Detail fetch FAILED for id=$detId : $_ — using list data." "WARN"
                 $enriched.Add((ConvertTo-FlatDetection $det))
             }
-
-            if ($DetailDelayMs -gt 0) { Start-Sleep -Milliseconds $DetailDelayMs }
+            if ($script:cfg_DetailDelayMs -gt 0) { Start-Sleep -Milliseconds $script:cfg_DetailDelayMs }
         }
         Write-Progress -Id 2 -Activity "Fetching detection details" -Completed
-
         if ($detailErrors -gt 0) {
-            Write-Log ("$detailErrors / $($allDetections.Count) detail fetch(es) failed and fell " +
-                       "back to list data. Those detections will have empty note fields.") "WARN"
+            Write-Log "$detailErrors detail fetch(es) failed and fell back to list data." "WARN"
         } else {
-            Write-Log "All $($allDetections.Count) detail fetch(es) completed successfully." "OK"
+            Write-Log "All detail fetches completed successfully." "OK"
         }
     } else {
-        Write-Log "FetchDetails=false — note/comment and detail-only fields will be empty." "WARN"
-        foreach ($det in $allDetections) {
-            $enriched.Add((ConvertTo-FlatDetection $det))
-        }
+        Write-Log "FetchDetails=false — note/comment fields will be empty." "WARN"
+        foreach ($det in $allDetections) { $enriched.Add((ConvertTo-FlatDetection $det)) }
     }
 
     Write-Log "$($enriched.Count) detection(s) ready for export." "OK"
 
     # ═══════════════════════════════════════════════════════════════
-    # STEP 11 — Write export files
+    # STEP 11 — Export
     # ═══════════════════════════════════════════════════════════════
-    Export-Detections -Data $enriched -Base $baseName -Dir $OutputPath -Format $ExportFormat
+    Export-Detections -Data $enriched -Base $baseName -Dir $script:cfg_OutputPath -Format $script:cfg_ExportFormat
 
     # ═══════════════════════════════════════════════════════════════
-    # STEP 12 — Save structured run log (audit trail)
+    # STEP 12 — Run log
     # ═══════════════════════════════════════════════════════════════
-    $runMeta = @{
-        scriptVersion     = "2.0"
+    Save-RunLog -Dir $script:cfg_OutputPath -Base $baseName -Meta @{
+        scriptVersion     = "3.0"
+        configFile        = (Get-ConfigPath)
         runStart          = $script:RunStart.ToString("o")
         runEnd            = (Get-Date).ToString("o")
         durationSeconds   = [int]((Get-Date) - $script:RunStart).TotalSeconds
-        server            = $Server
-        username          = $Username
-        domain            = $Domain
-        daysBack          = $DaysBack
-        filter            = $Filter
-        pageSize          = $PageSize
-        fetchDetails      = $FetchDetails
-        detailDelayMs     = $DetailDelayMs
-        maxRetries        = $MaxRetries
-        exportFormat      = $ExportFormat
-        outputPath        = $OutputPath
+        server            = $script:cfg_Server
+        username          = $script:cfg_Username
+        domain            = $script:cfg_Domain
+        filter            = $script:cfg_Filter
+        pageSize          = $script:cfg_PageSize
+        fetchDetails      = $script:cfg_FetchDetails
+        detailDelayMs     = $script:cfg_DetailDelayMs
+        maxRetries        = $script:cfg_MaxRetries
+        exportFormat      = $script:cfg_ExportFormat
+        outputPath        = $script:cfg_OutputPath
         totalMatched      = $totalCount
         totalFetched      = $allDetections.Count
         totalExported     = $enriched.Count
         detailFetchErrors = $detailErrors
         exitCode          = $script:ExitCode
     }
-    Save-RunLog -Dir $OutputPath -Base $baseName -Meta $runMeta
 
     # ═══════════════════════════════════════════════════════════════
-    # STEP 13 — Final summary
+    # STEP 13 — Summary
     # ═══════════════════════════════════════════════════════════════
     $duration = [int]((Get-Date) - $script:RunStart).TotalSeconds
     Write-Log "======================================================"
     Write-Log " Export complete in ${duration} second(s)"
     Write-Log " Matched by filter   : $totalCount"
     Write-Log " Detections exported : $($enriched.Count)"
-    if ($FetchDetails) {
-        Write-Log " Detail fetch errors : $detailErrors"
-    }
+    if ($script:cfg_FetchDetails) { Write-Log " Detail fetch errors : $detailErrors" }
     Write-Log "======================================================"
 
 } catch {
@@ -892,27 +1049,25 @@ try {
     Write-Log "FATAL ERROR: $_" "ERROR"
     Write-Log "Stack trace:`n$($_.ScriptStackTrace)" "DEBUG"
 
-    # Save emergency run log + any partial data we already collected
     $emergBase = "ESET_Inspect_Detections_FAILED_$(Get-Date -Format 'yyyyMMdd_HHmmss')"
-    $emergMeta = @{
+    $emergDir  = if ($script:cfg_OutputPath -and (Test-Path $script:cfg_OutputPath -IsValid)) {
+                     $script:cfg_OutputPath
+                 } else { (Get-Location).Path }
+
+    Save-RunLog -Dir $emergDir -Base $emergBase -Meta @{
         runStart   = $script:RunStart.ToString("o")
-        runEnd     = (Get-Date).ToString("o")
-        server     = $Server
-        username   = $Username
         fatalError = $_.ToString()
         stackTrace = $_.ScriptStackTrace
         partialDetectionsCollected = $enriched.Count
     }
-    Save-RunLog -Dir $OutputPath -Base $emergBase -Meta $emergMeta
 
     if ($enriched.Count -gt 0) {
-        Write-Log "Saving $($enriched.Count) partially-collected detection(s) before exit..." "WARN"
+        Write-Log "Saving $($enriched.Count) partially-collected detection(s)..." "WARN"
         Export-Detections -Data $enriched -Base "${emergBase}_partial" `
-                          -Dir $OutputPath -Format $ExportFormat -Label "PARTIAL"
+                          -Dir $emergDir -Format $script:cfg_ExportFormat -Label "PARTIAL"
     }
 
 } finally {
-    # Always clear progress bars to avoid leaving them stuck on the console
     Write-Progress -Id 1 -Activity "Fetching detection list"    -Completed -ErrorAction SilentlyContinue
     Write-Progress -Id 2 -Activity "Fetching detection details" -Completed -ErrorAction SilentlyContinue
 }
