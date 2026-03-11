@@ -330,6 +330,7 @@ function Invoke-SavePassword {
         $script:ConfigTemplate | ConvertTo-Json -Depth 5 | ConvertFrom-Json
     }
 
+    Import-DpapiAssembly
     $secPwd = Read-Host -Prompt "Enter password to encrypt and save" -AsSecureString
     $bstr   = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($secPwd)
     $plain  = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr)
@@ -405,6 +406,7 @@ function Read-Config {
             if ($PSVersionTable.PSVersion.Major -ge 6 -and $PSVersionTable.Platform -ne "Win32NT") {
                 Write-Log "EncryptedPassword found in config but DPAPI is not available on this OS. You will be prompted for your password." "WARN"
             } else {
+                Import-DpapiAssembly
                 $bytes = [Convert]::FromBase64String($encProp.Value)
                 $decrypted = [System.Security.Cryptography.ProtectedData]::Unprotect(
                     $bytes, $null,
@@ -467,6 +469,17 @@ function Merge-Config {
 #endregion
 
 #region ── TLS ───────────────────────────────────────────────────────────────────
+
+function Import-DpapiAssembly {
+    # System.Security assembly must be explicitly loaded in PS 5.1
+    # before [System.Security.Cryptography.ProtectedData] can be used.
+    # In PS 6+ it is available automatically but Add-Type is harmless.
+    try {
+        Add-Type -AssemblyName System.Security -ErrorAction Stop
+    } catch {
+        throw "Could not load System.Security assembly (required for DPAPI password encryption): $_"
+    }
+}
 
 function Enable-TlsBypass {
     if ($PSVersionTable.PSVersion.Major -lt 6) {
@@ -985,6 +998,7 @@ function Invoke-SaveConfig {
             Write-Log "DPAPI not available on this OS — password will not be saved to config." "WARN"
         } else {
             try {
+                Import-DpapiAssembly
                 $bytes     = [System.Text.Encoding]::UTF8.GetBytes($PlaintextPassword)
                 $encrypted = [System.Security.Cryptography.ProtectedData]::Protect(
                     $bytes, $null,
