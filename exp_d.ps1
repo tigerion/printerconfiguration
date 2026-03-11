@@ -129,6 +129,16 @@
 .PARAMETER MaxRetries
     Maximum retry attempts per failed API call before giving up. Default: 3.
 
+.PARAMETER FlattenComments
+    When $true, each comment is expanded into its own numbered set of columns instead of
+    being stored as a nested array. This makes the CSV and JSON directly openable in Excel
+    without any further transformation.
+    Columns produced per comment: comment1_author, comment1_time, comment1_text,
+                                   comment2_author, comment2_time, comment2_text, ...
+    The number of columns is determined by the detection with the most comments in the run.
+    Detections with fewer comments have the remaining columns left empty.
+    Default: $false
+
 .PARAMETER SkipCertificateCheck
     Ignore TLS/SSL certificate errors. Required for self-signed certs. Default: $true.
     Set to $false in production environments with valid certificates.
@@ -235,6 +245,9 @@ param(
     [int]$MaxRetries = -1,            # -1 = "not provided by user"
 
     [Parameter(ParameterSetName = "Run", Mandatory = $false)]
+    [object]$FlattenComments = $null,       # $null = "not provided by user"
+
+    [Parameter(ParameterSetName = "Run", Mandatory = $false)]
     [object]$SkipCertificateCheck = $null   # $null = "not provided by user"
 )
 
@@ -289,6 +302,7 @@ $script:ConfigTemplate = [ordered]@{
     "Filter"               = ""
     "PageSize"             = 100
     "FetchDetails"         = $true
+    "FlattenComments"      = $false
     "DetailDelayMs"        = 50
     "MaxRetries"           = 3
     "SkipCertificateCheck" = $true
@@ -391,7 +405,7 @@ function Read-Config {
     # Map each known key from the JSON object into the hashtable.
     # Use PSObject.Properties — StrictMode throws if we use $raw.$key on a missing property.
     foreach ($key in @("Server","Username","Domain","OutputPath","ExportFormat",
-                        "DaysBack","Filter","PageSize","FetchDetails",
+                        "DaysBack","Filter","PageSize","FetchDetails","FlattenComments",
                         "DetailDelayMs","MaxRetries","SkipCertificateCheck")) {
         $prop = $raw.PSObject.Properties[$key]
         if ($null -ne $prop -and $null -ne $prop.Value -and "$($prop.Value)" -ne "") {
@@ -454,6 +468,7 @@ function Merge-Config {
     $script:cfg_FetchDetails         = Resolve-Bool $FetchDetails         "FetchDetails"         $true
     $script:cfg_DetailDelayMs        = Resolve-Int  $DetailDelayMs        "DetailDelayMs"        50
     $script:cfg_MaxRetries           = Resolve-Int  $MaxRetries           "MaxRetries"           3
+    $script:cfg_FlattenComments      = Resolve-Bool $FlattenComments      "FlattenComments"      $false
     $script:cfg_SkipCertificateCheck = Resolve-Bool $SkipCertificateCheck "SkipCertificateCheck" $true
 
     # Validate ExportFormat after merge (can't use [ValidateSet] on merged value)
@@ -768,20 +783,40 @@ function ConvertTo-FlatDetection {
     $score   = try { [int](Get-Prop $D 'severityScore'        0) } catch {  0 }
     $handled = try { [int](Get-Prop $D 'handled'              0) } catch {  0 }
 
-    # Resolve computerIp BEFORE the hashtable — PS cannot parse try/catch as hash values
+    # Resolve computerIp BEFORE the hashtable — PS cannot parse try/catch as hash values.
+    # The API returns computerIp in two different shapes depending on endpoint:
+    #   List endpoint   : single PSCustomObject { ipv4Addresses=[]; ipv6Addresses=[]; macAddress="" }
+    #   Detail endpoint : System.Object[] where each element is a PSCustomObject { ipv4Addresses=[]; ... }
+    # We normalise both into a single object to extract from.
     $ipObj = Get-Prop $D 'computerIp'
-    $ipv4  = try {
+    $ipNorm = try {
         if ($null -eq $ipObj) { $null }
-        elseif ($ipObj -is [string]) { $ipObj }
-        else { $arr = $ipObj.PSObject.Properties['ipv4Addresses']; if ($arr -and $arr.Value) { $arr.Value -join ', ' } else { $null } }
+        elseif ($ipObj -is [System.Object[]] -and $ipObj.Count -gt 0) { $ipObj[0] }  # detail: unwrap array
+        elseif ($ipObj -is [System.Collections.IList] -and $ipObj.Count -gt 0) { $ipObj[0] }
+        else { $ipObj }  # list: already a flat object
     } catch { $null }
-    $ipv6  = try {
-        if ($null -eq $ipObj -or $ipObj -is [string]) { $null }
-        else { $arr = $ipObj.PSObject.Properties['ipv6Addresses']; if ($arr -and $arr.Value) { $arr.Value -join ', ' } else { $null } }
+
+    $ipv4 = try {
+        if ($null -eq $ipNorm) { $null }
+        elseif ($ipNorm -is [string]) { $ipNorm }
+        else {
+            $arr = $ipNorm.PSObject.Properties['ipv4Addresses']
+            if ($arr -and $arr.Value) { @($arr.Value) -join ', ' } else { $null }
+        }
     } catch { $null }
-    $mac   = try {
-        if ($null -eq $ipObj -or $ipObj -is [string]) { $null }
-        else { $m = $ipObj.PSObject.Properties['macAddress']; if ($m) { $m.Value } else { $null } }
+    $ipv6 = try {
+        if ($null -eq $ipNorm -or $ipNorm -is [string]) { $null }
+        else {
+            $arr = $ipNorm.PSObject.Properties['ipv6Addresses']
+            if ($arr -and $arr.Value) { @($arr.Value) -join ', ' } else { $null }
+        }
+    } catch { $null }
+    $mac  = try {
+        if ($null -eq $ipNorm -or $ipNorm -is [string]) { $null }
+        else {
+            $m = $ipNorm.PSObject.Properties['macAddress']
+            if ($m -and $m.Value) { $m.Value } else { $null }
+        }
     } catch { $null }
 
     $flat = [PSCustomObject]@{
@@ -988,6 +1023,7 @@ function Invoke-SaveConfig {
     $cfg['ExportFormat']         = $script:cfg_ExportFormat
     $cfg['PageSize']             = $script:cfg_PageSize
     $cfg['FetchDetails']         = $script:cfg_FetchDetails
+    $cfg['FlattenComments']      = $script:cfg_FlattenComments
     $cfg['DetailDelayMs']        = $script:cfg_DetailDelayMs
     $cfg['MaxRetries']           = $script:cfg_MaxRetries
     $cfg['SkipCertificateCheck'] = $script:cfg_SkipCertificateCheck
@@ -1132,6 +1168,7 @@ try {
     Write-Log "Domain auth   : $($script:cfg_Domain)"
     Write-Log "Filter        : $(if ($script:cfg_Filter) { $script:cfg_Filter } else { '(none — all detections)' })"
     Write-Log "FetchDetails  : $($script:cfg_FetchDetails)"
+    Write-Log "FlattenComments: $($script:cfg_FlattenComments)"
     Write-Log "ExportFormat  : $($script:cfg_ExportFormat)"
     Write-Log "OutputPath    : $($script:cfg_OutputPath)"
     Write-Log "PageSize      : $($script:cfg_PageSize)  |  MaxRetries: $($script:cfg_MaxRetries)  |  DetailDelayMs: $($script:cfg_DetailDelayMs)"
@@ -1281,6 +1318,55 @@ try {
     }
 
     Write-Log "$($enriched.Count) detection(s) ready for export." "OK"
+
+    # ═══════════════════════════════════════════════════════════════
+    # STEP 10b — Flatten comments (if requested)
+    # ═══════════════════════════════════════════════════════════════
+    if ($script:cfg_FlattenComments) {
+        Write-Log "Flattening comments into numbered columns for Excel compatibility..."
+
+        # First pass — find the maximum number of comments across all detections
+        $maxComments = 0
+        foreach ($det in $enriched) {
+            $arr = $det.PSObject.Properties['commentsArray']
+            if ($null -ne $arr -and $null -ne $arr.Value) {
+                $count = @($arr.Value).Count
+                if ($count -gt $maxComments) { $maxComments = $count }
+            }
+        }
+        Write-Log "  Max comments on a single detection: $maxComments"
+
+        if ($maxComments -gt 0) {
+            # Second pass — rebuild each detection object with flat comment columns
+            $flatEnriched = [System.Collections.Generic.List[object]]::new($enriched.Count)
+            foreach ($det in $enriched) {
+                # Copy all existing properties except commentsArray
+                $props = [ordered]@{}
+                foreach ($p in $det.PSObject.Properties) {
+                    if ($p.Name -ne 'commentsArray') {
+                        $props[$p.Name] = $p.Value
+                    }
+                }
+
+                # Add one set of columns per possible comment slot
+                $arr = $det.PSObject.Properties['commentsArray']
+                $comments = if ($null -ne $arr -and $null -ne $arr.Value) { @($arr.Value) } else { @() }
+
+                for ($i = 1; $i -le $maxComments; $i++) {
+                    $c = if ($i -le $comments.Count) { $comments[$i - 1] } else { $null }
+                    $props["comment${i}_author"] = if ($null -ne $c) { $c.authorName   } else { "" }
+                    $props["comment${i}_time"]   = if ($null -ne $c) { $c.creationTime } else { "" }
+                    $props["comment${i}_text"]   = if ($null -ne $c) { $c.comment      } else { "" }
+                }
+
+                $flatEnriched.Add([PSCustomObject]$props)
+            }
+            $enriched = $flatEnriched
+            Write-Log "Comments flattened into $maxComments column group(s) (comment1_author/time/text, comment2_..., etc.)." "OK"
+        } else {
+            Write-Log "No comments found — skipping flatten, commentsArray will be empty." "WARN"
+        }
+    }
 
     # ═══════════════════════════════════════════════════════════════
     # STEP 11 — Export
