@@ -1042,6 +1042,14 @@ try {
         }
         $allDetections.AddRange([object[]]$valueProp.Value)
 
+        # DEBUG — log the raw property names and values of the first item on the first page
+        if ($page -eq 0 -and $allDetections.Count -gt 0) {
+            Write-Log "DEBUG: Raw property names on first list-detection object:" "DEBUG"
+            $allDetections[0].PSObject.Properties | ForEach-Object {
+                Write-Log ("DEBUG:   [$($_.Name)] = $($_.Value)") "DEBUG"
+            }
+        }
+
         Write-Progress -Id 1 -Activity "Fetching detection list" `
             -Status "$($page+1) of $pageCount pages  |  $($allDetections.Count) collected" `
             -PercentComplete ([int](($page+1)/$pageCount*100))
@@ -1067,6 +1075,13 @@ try {
                 -PercentComplete ([int]($fetched/$allDetections.Count*100))
             try {
                 $detail = Invoke-ApiCall -Uri "$baseUrl/api/v1/detections/$detId" -Headers $authHeaders
+                # DEBUG — log raw property names on the first detail response
+                if ($fetched -eq 1) {
+                    Write-Log "DEBUG: Raw property names on first detail-detection object:" "DEBUG"
+                    $detail.PSObject.Properties | ForEach-Object {
+                        Write-Log ("DEBUG:   [$($_.Name)] = $($_.Value)") "DEBUG"
+                    }
+                }
                 $enriched.Add((ConvertTo-FlatDetection $detail))
             } catch {
                 $detailErrors++
