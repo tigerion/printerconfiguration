@@ -766,7 +766,33 @@ function ConvertTo-FlatDetection {
         computerId                = Get-Prop $D 'computerId'
         computerName              = Get-Prop $D 'computerName'
         computerUuid              = Get-Prop $D 'computerUuid'
-        computerIp                = Get-Prop $D 'computerIp'                  # may be nested object
+        # computerIp is a nested object — flatten to usable scalar strings
+        computerIpv4              = try {
+                                        $ip = Get-Prop $D 'computerIp'
+                                        if ($null -eq $ip) { $null }
+                                        elseif ($ip -is [string]) { $ip }
+                                        else {
+                                            $arr = $ip.PSObject.Properties['ipv4Addresses']
+                                            if ($arr -and $arr.Value) { ($arr.Value -join ', ') } else { $null }
+                                        }
+                                    } catch { $null }
+        computerIpv6              = try {
+                                        $ip = Get-Prop $D 'computerIp'
+                                        if ($null -eq $ip) { $null }
+                                        elseif ($ip -is [string]) { $null }
+                                        else {
+                                            $arr = $ip.PSObject.Properties['ipv6Addresses']
+                                            if ($arr -and $arr.Value) { ($arr.Value -join ', ') } else { $null }
+                                        }
+                                    } catch { $null }
+        computerMac               = try {
+                                        $ip = Get-Prop $D 'computerIp'
+                                        if ($null -eq $ip -or $ip -is [string]) { $null }
+                                        else {
+                                            $mac = $ip.PSObject.Properties['macAddress']
+                                            if ($mac) { $mac.Value } else { $null }
+                                        }
+                                    } catch { $null }
 
         # ── Rule ──────────────────────────────────────────────────────────────
         ruleId                    = Get-Prop $D 'ruleId'
@@ -817,30 +843,69 @@ function ConvertTo-FlatDetection {
         moduleLgReputation        = Get-Prop $D 'moduleLgReputation'
 
         # ── Analyst note / comment ────────────────────────────────────────────
-        note                      = Get-Prop $D 'note'
+        # Note: use "" default (not $null) so an intentionally blank note is preserved
+        note                      = (Get-Prop $D 'note' "")
 
         # ── Raw event payload (present on some detection types) ───────────────
         event                     = Get-Prop $D 'event'
     }
 
-    # If any mapped field is null, write a one-time debug JSON so the analyst can
-    # inspect the raw object and report missing fields — but only once per run.
+    # If any mapped field is null/empty, write a one-time human-readable debug file.
+    # Fields that are EXPECTED to sometimes be empty (e.g. note, ruleName on malware
+    # detections) are excluded from the null check to avoid noise.
+    $expectedEmpty = @('note','ruleName','ruleId','ruleUuid','processCommandLine',
+                       'parentProcessName','threatUri','moduleSigner','event',
+                       'processEpxUuid','computerIpv6')
+
     if (-not $script:NullDebugWritten) {
         $nullFields = $flat.PSObject.Properties |
-            Where-Object { $null -eq $_.Value -or "$($_.Value)" -eq "" } |
+            Where-Object { ($null -eq $_.Value -or "$($_.Value)" -eq "") -and
+                           ($_.Name -notin $expectedEmpty) } |
             Select-Object -ExpandProperty Name
+
         if ($nullFields) {
             $script:NullDebugWritten = $true
-            $debugPayload = [PSCustomObject]@{
-                _info       = "One or more mapped fields were null/empty. Raw API object included for inspection."
-                _nullFields = $nullFields
-                _rawObject  = $D
-            }
-            $debugPath = Join-Path $script:cfg_OutputPath "ESET_NullFields_Debug_$(Get-Date -Format 'yyyyMMdd_HHmmss').json"
+            $debugPath = Join-Path $script:cfg_OutputPath "ESET_NullFields_Debug_$(Get-Date -Format 'yyyyMMdd_HHmmss').txt"
             try {
-                $debugPayload | ConvertTo-Json -Depth 10 |
-                    Out-File -FilePath $debugPath -Encoding UTF8
-                Write-Log "Null fields detected — raw debug object saved to: $debugPath" "WARN"
+                $lines = [System.Collections.Generic.List[string]]::new()
+                $lines.Add("=" * 70)
+                $lines.Add("ESET Inspect — Null Field Debug Report")
+                $lines.Add("Generated : $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')")
+                $lines.Add("Detection : id=$(Get-Prop $D 'id')  uuid=$(Get-Prop $D 'uuid')")
+                $lines.Add("=" * 70)
+                $lines.Add("")
+                $lines.Add("The following mapped fields were null or empty on this detection.")
+                $lines.Add("If a field you expect is missing, paste the MAPPED VALUES and")
+                $lines.Add("RAW API PROPERTIES sections below into chat for investigation.")
+                $lines.Add("")
+                $lines.Add("FIELDS THAT WERE NULL: $($nullFields -join ', ')")
+                $lines.Add("")
+                $lines.Add("-" * 70)
+                $lines.Add("MAPPED VALUES (all exported fields for this detection):")
+                $lines.Add("-" * 70)
+                foreach ($p in $flat.PSObject.Properties) {
+                    $lines.Add("  $($p.Name.PadRight(30)) = $($p.Value)")
+                }
+                $lines.Add("")
+                $lines.Add("-" * 70)
+                $lines.Add("RAW API PROPERTIES (what the API actually returned):")
+                $lines.Add("-" * 70)
+                foreach ($p in $D.PSObject.Properties) {
+                    $val = $p.Value
+                    # Flatten any nested objects one level deep for readability
+                    if ($null -ne $val -and $val -is [System.Management.Automation.PSCustomObject]) {
+                        $nested = ($val.PSObject.Properties | ForEach-Object { "$($_.Name)=$($_.Value)" }) -join '; '
+                        $val = "{ $nested }"
+                    } elseif ($null -ne $val -and $val -is [System.Object[]]) {
+                        $val = "[" + ($val -join ', ') + "]"
+                    }
+                    $lines.Add("  $($p.Name.PadRight(30)) = $val")
+                }
+                $lines.Add("")
+                $lines.Add("=" * 70)
+
+                $lines | Out-File -FilePath $debugPath -Encoding UTF8
+                Write-Log "Unexpected null fields detected — debug report: $debugPath" "WARN"
                 Write-Log "  Null fields: $($nullFields -join ', ')" "WARN"
             } catch {
                 Write-Log "Could not write null-field debug file: $_" "WARN"
@@ -1148,6 +1213,34 @@ try {
                 -PercentComplete ([int]($fetched/$allDetections.Count*100))
             try {
                 $detail = Invoke-ApiCall -Uri "$baseUrl/api/v1/detections/$detId" -Headers $authHeaders
+
+                # ── Comments endpoint probe (runs only on the first detection) ──────────
+                # The GUI shows a Comments section with multiple entries — not the note field.
+                # We need to find the undocumented endpoint. Try common REST patterns.
+                if ($fetched -eq 1) {
+                    Write-Log "PROBE: Searching for comments endpoint on detection id=$detId..." "DEBUG"
+                    $candidateUrls = @(
+                        "$baseUrl/api/v1/detections/$detId/comments",
+                        "$baseUrl/api/v1/detections/$detId/notes",
+                        "$baseUrl/api/v1/detections/$detId/activities",
+                        "$baseUrl/api/v1/detections/$detId/history",
+                        "$baseUrl/api/v1/detections/$detId/audit",
+                        "$baseUrl/api/v2/detections/$detId/comments",
+                        "$baseUrl/api/v2/detections/$detId/notes"
+                    )
+                    foreach ($url in $candidateUrls) {
+                        try {
+                            $probe = Invoke-ApiCall -Uri $url -Headers $authHeaders
+                            Write-Log "PROBE HIT  : $url" "DEBUG"
+                            Write-Log "PROBE RESP : $($probe | ConvertTo-Json -Depth 5 -Compress)" "DEBUG"
+                        } catch {
+                            $probeStatus = if ($_ -match 'HTTP (\d+)') { $Matches[1] } else { "ERR" }
+                            Write-Log "PROBE MISS : $url  ($probeStatus)" "DEBUG"
+                        }
+                    }
+                }
+                # ── End probe ─────────────────────────────────────────────────────────────
+
                 $enriched.Add((ConvertTo-FlatDetection $detail))
             } catch {
                 $detailErrors++
