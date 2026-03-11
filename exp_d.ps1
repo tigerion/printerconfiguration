@@ -156,6 +156,14 @@
     .\Export-EsetInspectDetections.ps1 -Filter "resolved eq false and creationTime ge $since" `
         -ExportFormat CSV -OutputPath "C:\Reports"
 
+.PARAMETER SaveConfig
+    After a successful export, write all effective settings to the config file so you
+    never have to type them again. The password is encrypted with DPAPI and stored as
+    EncryptedPassword. Existing config values are merged — only supplied parameters are
+    overwritten, so you can safely run with -SaveConfig on any run without losing other
+    stored settings.
+    Example: run once with all your flags plus -SaveConfig, then run with no arguments forever.
+
 .NOTES
     API reference : https://help.eset.com/ei_navigate/2.5/en-US/rest_api_detections.html
     Tested against: ESET Inspect On-Prem 2.5 / 2.6
@@ -178,6 +186,9 @@ param(
 
     [Parameter(ParameterSetName = "GenerateConfig", Mandatory = $false)]
     [switch]$Force,
+
+    [Parameter(ParameterSetName = "Run", Mandatory = $false)]
+    [switch]$SaveConfig,
 
     # ── Connection ────────────────────────────────────────────────────────────
     [Parameter(ParameterSetName = "Run", Mandatory = $false)]
@@ -801,6 +812,78 @@ function Export-Detections {
 
 #endregion
 
+function Invoke-SaveConfig {
+    <#
+    Write the current effective settings back to the config file.
+    - Called automatically after a successful export when -SaveConfig is specified.
+    - Merges into any existing config rather than overwriting unrelated keys.
+    - Password is encrypted with DPAPI (Windows) so it is never stored in plaintext.
+    - DaysBack and Filter are intentionally NOT saved — they are run-specific values
+      that you almost always want to choose fresh each time.
+    #>
+    param([string]$PlaintextPassword)
+
+    $path = Get-ConfigPath
+
+    # Load existing config as a hashtable so we can merge cleanly
+    $cfg = [ordered]@{}
+    if (Test-Path $path) {
+        try {
+            $existing = Get-Content $path -Raw | ConvertFrom-Json
+            foreach ($prop in $existing.PSObject.Properties) {
+                $cfg[$prop.Name] = $prop.Value
+            }
+        } catch {
+            Write-Log "Could not read existing config for merge (will overwrite): $_" "WARN"
+        }
+    }
+
+    # Stamp comment and version
+    $cfg['_comment']       = "ESET Inspect On-Prem Detection Exporter — config file. All fields are optional; command-line arguments always override these values."
+    $cfg['_savedAt']       = (Get-Date).ToString('o')
+    $cfg['_scriptVersion'] = "3.0"
+
+    # Write every effective setting (skip DaysBack and Filter — run-specific)
+    $cfg['Server']               = $script:cfg_Server
+    $cfg['Username']             = $script:cfg_Username
+    $cfg['Domain']               = $script:cfg_Domain
+    $cfg['OutputPath']           = $script:cfg_OutputPath
+    $cfg['ExportFormat']         = $script:cfg_ExportFormat
+    $cfg['PageSize']             = $script:cfg_PageSize
+    $cfg['FetchDetails']         = $script:cfg_FetchDetails
+    $cfg['DetailDelayMs']        = $script:cfg_DetailDelayMs
+    $cfg['MaxRetries']           = $script:cfg_MaxRetries
+    $cfg['SkipCertificateCheck'] = $script:cfg_SkipCertificateCheck
+
+    # Encrypt and save password if we have a plaintext copy (only available on this run)
+    if (-not [string]::IsNullOrWhiteSpace($PlaintextPassword)) {
+        if (-not $IsWindows -and $PSVersionTable.PSVersion.Major -ge 6) {
+            Write-Log "DPAPI not available on this OS — password will not be saved to config." "WARN"
+        } else {
+            try {
+                $bytes     = [System.Text.Encoding]::UTF8.GetBytes($PlaintextPassword)
+                $encrypted = [System.Security.Cryptography.ProtectedData]::Protect(
+                    $bytes, $null,
+                    [System.Security.Cryptography.DataProtectionScope]::CurrentUser
+                )
+                $cfg['EncryptedPassword'] = [Convert]::ToBase64String($encrypted)
+                $cfg['_passwordComment']  = "Do not edit EncryptedPassword manually. Run with -SavePassword or -SaveConfig to update it."
+                Write-Log "Password encrypted (DPAPI) and saved to config." "OK"
+            } catch {
+                Write-Log "Could not encrypt password for config: $_" "WARN"
+            }
+        }
+    }
+
+    try {
+        $cfg | ConvertTo-Json -Depth 5 | Out-File -FilePath $path -Encoding UTF8
+        Write-Log "Settings saved to config: $path" "OK"
+        Write-Log "  Next run you can omit: -Server, -Username, -Password, -OutputPath, and all tuning flags." "OK"
+    } catch {
+        Write-Log "Failed to write config file '$path': $_" "WARN"
+    }
+}
+
 #region ── Entry point ────────────────────────────────────────────────────────────
 
 # Handle utility modes before doing anything else
@@ -815,6 +898,7 @@ Merge-Config -Cfg $fileCfg
 
 $detailErrors  = 0
 $totalCount    = 0
+$pwdForSave    = ""          # plaintext password held briefly for -SaveConfig, zeroed after use
 $enriched      = [System.Collections.Generic.List[object]]::new()
 $allDetections = [System.Collections.Generic.List[object]]::new()
 $timestamp     = Get-Date -Format "yyyyMMdd_HHmmss"
@@ -909,6 +993,8 @@ try {
     # ═══════════════════════════════════════════════════════════════
     Write-Log "Authenticating as '$($script:cfg_Username)' on '$($script:cfg_Server)'..."
     $token               = Invoke-Authenticate -Pwd $script:cfg_Password
+    # Capture plaintext for -SaveConfig BEFORE zeroing (needs to re-encrypt it)
+    $pwdForSave          = if ($SaveConfig) { $script:cfg_Password } else { "" }
     $script:cfg_Password = "x" * $script:cfg_Password.Length
     $script:cfg_Password = ""
     $authHeaders         = @{ "Authorization" = "Bearer $token" }
@@ -1006,6 +1092,16 @@ try {
     # STEP 11 — Export
     # ═══════════════════════════════════════════════════════════════
     Export-Detections -Data $enriched -Base $baseName -Dir $script:cfg_OutputPath -Format $script:cfg_ExportFormat
+
+    # ═══════════════════════════════════════════════════════════════
+    # STEP 11b — Save config (if requested)
+    # ═══════════════════════════════════════════════════════════════
+    if ($SaveConfig) {
+        Write-Log "Saving current settings to config file (-SaveConfig)..."
+        Invoke-SaveConfig -PlaintextPassword $pwdForSave
+        # Zero the saved copy now we are done with it
+        $pwdForSave = "x" * $pwdForSave.Length; $pwdForSave = ""
+    }
 
     # ═══════════════════════════════════════════════════════════════
     # STEP 12 — Run log
