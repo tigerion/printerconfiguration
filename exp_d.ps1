@@ -769,14 +769,11 @@ function ConvertTo-FlatDetection {
     } catch { $null }
 
     $flat = [PSCustomObject]@{
-        # ── Identifiers ───────────────────────────────────────────────────────
         id                        = Get-Prop $D 'id'
         uuid                      = Get-Prop $D 'uuid'
-
-        # ── Timestamps ────────────────────────────────────────────────────────
         creationTime              = Get-Prop $D 'creationTime'
-        moduleFirstSeenLocally    = Get-Prop $D 'moduleFirstSeenLocally'      # detail only
-        moduleLastExecutedLocally = Get-Prop $D 'moduleLastExecutedLocally'   # detail only
+        moduleFirstSeenLocally    = Get-Prop $D 'moduleFirstSeenLocally'
+        moduleLastExecutedLocally = Get-Prop $D 'moduleLastExecutedLocally'
 
         # ── Computer ──────────────────────────────────────────────────────────
         computerId                = Get-Prop $D 'computerId'
@@ -785,43 +782,31 @@ function ConvertTo-FlatDetection {
         computerIpv4              = $ipv4
         computerIpv6              = $ipv6
         computerMac               = $mac
-
-        # ── Rule ──────────────────────────────────────────────────────────────
         ruleId                    = Get-Prop $D 'ruleId'
         ruleUuid                  = Get-Prop $D 'ruleUuid'
         ruleName                  = Get-Prop $D 'ruleName'
-
-        # ── Classification ────────────────────────────────────────────────────
         type                      = $typeId
         typeLabel                 = if ($script:DetectionTypeMap.ContainsKey($typeId)) { $script:DetectionTypeMap[$typeId] } else { "Unknown($typeId)" }
         severity                  = Get-Prop $D 'severity'
         severityScore             = $score
         severityLabel             = Get-SeverityLabel $score
         priority                  = Get-Prop $D 'priority'
-
-        # ── Status ────────────────────────────────────────────────────────────
         resolved                  = Get-Prop $D 'resolved'
         autoResolved              = Get-Prop $D 'autoResolved'
         resolvedOccurrences       = Get-Prop $D 'resolvedOccurrences'
-        handled                   = $handled                                  # detail only
+        handled                   = $handled
         occurrenceCount           = Get-Prop $D 'occurrenceCount'
         occurrences               = Get-Prop $D 'occurrences'
-
-        # ── Threat ────────────────────────────────────────────────────────────
         threatName                = Get-Prop $D 'threatName'
         threatUri                 = Get-Prop $D 'threatUri'
-
-        # ── Process ───────────────────────────────────────────────────────────
         processId                 = Get-Prop $D 'processId'
         processUuid               = Get-Prop $D 'processUuid'
-        processEpxUuid            = Get-Prop $D 'processEpxUuid'              # detail only
+        processEpxUuid            = Get-Prop $D 'processEpxUuid'
         processName               = Get-Prop $D 'processName'
         processUser               = Get-Prop $D 'processUser'
         processCommandLine        = Get-Prop $D 'processCommandLine'
-        processPath               = Get-Prop $D 'processPath'                 # detail only
+        processPath               = Get-Prop $D 'processPath'
         parentProcessName         = Get-Prop $D 'parentProcessName'
-
-        # ── Module / Executable ───────────────────────────────────────────────
         moduleId                  = Get-Prop $D 'moduleId'
         moduleUuid                = Get-Prop $D 'moduleUuid'
         moduleName                = Get-Prop $D 'moduleName'
@@ -833,12 +818,8 @@ function ConvertTo-FlatDetection {
         moduleLgAge               = Get-Prop $D 'moduleLgAge'
         moduleLgPopularity        = Get-Prop $D 'moduleLgPopularity'
         moduleLgReputation        = Get-Prop $D 'moduleLgReputation'
-
-        # ── Analyst note / comment ────────────────────────────────────────────
         # Note: use "" default (not $null) so an intentionally blank note is preserved
         note                      = (Get-Prop $D 'note' "")
-
-        # ── Raw event payload (present on some detection types) ───────────────
         event                     = Get-Prop $D 'event'
     }
 
