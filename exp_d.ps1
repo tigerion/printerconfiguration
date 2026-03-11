@@ -752,6 +752,22 @@ function ConvertTo-FlatDetection {
     $score   = try { [int](Get-Prop $D 'severityScore'        0) } catch {  0 }
     $handled = try { [int](Get-Prop $D 'handled'              0) } catch {  0 }
 
+    # Resolve computerIp BEFORE the hashtable — PS cannot parse try/catch as hash values
+    $ipObj = Get-Prop $D 'computerIp'
+    $ipv4  = try {
+        if ($null -eq $ipObj) { $null }
+        elseif ($ipObj -is [string]) { $ipObj }
+        else { $arr = $ipObj.PSObject.Properties['ipv4Addresses']; if ($arr -and $arr.Value) { $arr.Value -join ', ' } else { $null } }
+    } catch { $null }
+    $ipv6  = try {
+        if ($null -eq $ipObj -or $ipObj -is [string]) { $null }
+        else { $arr = $ipObj.PSObject.Properties['ipv6Addresses']; if ($arr -and $arr.Value) { $arr.Value -join ', ' } else { $null } }
+    } catch { $null }
+    $mac   = try {
+        if ($null -eq $ipObj -or $ipObj -is [string]) { $null }
+        else { $m = $ipObj.PSObject.Properties['macAddress']; if ($m) { $m.Value } else { $null } }
+    } catch { $null }
+
     $flat = [PSCustomObject]@{
         # ── Identifiers ───────────────────────────────────────────────────────
         id                        = Get-Prop $D 'id'
@@ -766,33 +782,9 @@ function ConvertTo-FlatDetection {
         computerId                = Get-Prop $D 'computerId'
         computerName              = Get-Prop $D 'computerName'
         computerUuid              = Get-Prop $D 'computerUuid'
-        # computerIp is a nested object — flatten to usable scalar strings
-        computerIpv4              = try {
-                                        $ip = Get-Prop $D 'computerIp'
-                                        if ($null -eq $ip) { $null }
-                                        elseif ($ip -is [string]) { $ip }
-                                        else {
-                                            $arr = $ip.PSObject.Properties['ipv4Addresses']
-                                            if ($arr -and $arr.Value) { ($arr.Value -join ', ') } else { $null }
-                                        }
-                                    } catch { $null }
-        computerIpv6              = try {
-                                        $ip = Get-Prop $D 'computerIp'
-                                        if ($null -eq $ip) { $null }
-                                        elseif ($ip -is [string]) { $null }
-                                        else {
-                                            $arr = $ip.PSObject.Properties['ipv6Addresses']
-                                            if ($arr -and $arr.Value) { ($arr.Value -join ', ') } else { $null }
-                                        }
-                                    } catch { $null }
-        computerMac               = try {
-                                        $ip = Get-Prop $D 'computerIp'
-                                        if ($null -eq $ip -or $ip -is [string]) { $null }
-                                        else {
-                                            $mac = $ip.PSObject.Properties['macAddress']
-                                            if ($mac) { $mac.Value } else { $null }
-                                        }
-                                    } catch { $null }
+        computerIpv4              = $ipv4
+        computerIpv6              = $ipv6
+        computerMac               = $mac
 
         # ── Rule ──────────────────────────────────────────────────────────────
         ruleId                    = Get-Prop $D 'ruleId'
