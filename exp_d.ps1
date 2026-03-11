@@ -314,7 +314,7 @@ function Invoke-GenerateConfig {
 
 function Invoke-SavePassword {
     # DPAPI is Windows-only
-    if (-not $IsWindows -and $PSVersionTable.PSVersion.Major -ge 6) {
+    if ($PSVersionTable.PSVersion.Major -ge 6 -and $PSVersionTable.Platform -ne "Win32NT") {
         Write-Host "DPAPI password encryption is only supported on Windows." -ForegroundColor Red
         Write-Host "On Linux/macOS you will be prompted for your password on each run." -ForegroundColor Yellow
         exit 1
@@ -398,7 +398,7 @@ function Read-Config {
     # Decrypt password if present
     if (-not [string]::IsNullOrWhiteSpace($raw.EncryptedPassword)) {
         try {
-            if (-not $IsWindows -and $PSVersionTable.PSVersion.Major -ge 6) {
+            if ($PSVersionTable.PSVersion.Major -ge 6 -and $PSVersionTable.Platform -ne "Win32NT") {
                 Write-Log "EncryptedPassword found in config but DPAPI is not available on this OS. You will be prompted for your password." "WARN"
             } else {
                 $bytes = [Convert]::FromBase64String($raw.EncryptedPassword)
@@ -857,7 +857,7 @@ function Invoke-SaveConfig {
 
     # Encrypt and save password if we have a plaintext copy (only available on this run)
     if (-not [string]::IsNullOrWhiteSpace($PlaintextPassword)) {
-        if (-not $IsWindows -and $PSVersionTable.PSVersion.Major -ge 6) {
+        if ($PSVersionTable.PSVersion.Major -ge 6 -and $PSVersionTable.Platform -ne "Win32NT") {
             Write-Log "DPAPI not available on this OS — password will not be saved to config." "WARN"
         } else {
             try {
