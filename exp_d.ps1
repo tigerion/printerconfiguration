@@ -261,6 +261,8 @@ $script:ExitCode        = 0
 $script:RunLog          = [System.Collections.Generic.List[hashtable]]::new()
 $script:NullDebugWritten = $false   # write null-field debug file only once per run
 
+$script:IpDiagWritten    = $false   # write IP diagnostic log only once per run
+
 # Resolve the default config path (same directory as the script)
 $script:DefaultConfigPath = Join-Path $PSScriptRoot "eset-config.json"
 
@@ -789,6 +791,11 @@ function ConvertTo-FlatDetection {
     #   Detail endpoint : System.Object[] where each element is a PSCustomObject { ipv4Addresses=[]; ... }
     # We normalise both into a single object to extract from.
     $ipObj = Get-Prop $D 'computerIp'
+    # IP diagnostic -- runs once per script execution, remove after confirming correct output
+    if (-not $script:IpDiagWritten) {
+        $script:IpDiagWritten = $true
+        Write-Log "IP DIAG: computerIp type=[$($ipObj.GetType().FullName)]  value=$($ipObj | ConvertTo-Json -Depth 3 -Compress)" "DEBUG"
+    }
     $ipNorm = try {
         if ($null -eq $ipObj) { $null }
         elseif ($ipObj -is [System.Object[]] -and $ipObj.Count -gt 0) { $ipObj[0] }  # detail: unwrap array
