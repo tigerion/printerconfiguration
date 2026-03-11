@@ -741,7 +741,7 @@ function Resolve-DetectionObject {
 }
 
 function ConvertTo-FlatDetection {
-    param([PSCustomObject]$Raw)
+    param([PSCustomObject]$Raw, [hashtable]$Comments = @{ text = ""; array = @() })
 
     # Unwrap detail-endpoint wrapper if present
     $D = Resolve-DetectionObject $Raw
@@ -820,6 +820,8 @@ function ConvertTo-FlatDetection {
         moduleLgReputation        = Get-Prop $D 'moduleLgReputation'
         # Note: use "" default (not $null) so an intentionally blank note is preserved
         note                      = (Get-Prop $D 'note' "")
+        commentsText              = $Comments.text
+        commentsArray             = $Comments.array
         event                     = Get-Prop $D 'event'
     }
 
@@ -828,7 +830,7 @@ function ConvertTo-FlatDetection {
     # detections) are excluded from the null check to avoid noise.
     $expectedEmpty = @('note','ruleName','ruleId','ruleUuid','processCommandLine',
                        'parentProcessName','threatUri','moduleSigner','event',
-                       'processEpxUuid','computerIpv6')
+                       'processEpxUuid','computerIpv6','commentsText','commentsArray')
 
     if (-not $script:NullDebugWritten) {
         $nullFields = $flat.PSObject.Properties |
@@ -1001,6 +1003,58 @@ function Invoke-SaveConfig {
     } catch {
         Write-Log "Failed to write config file '$path': $_" "WARN"
     }
+}
+
+function Get-DetectionComments {
+    <#
+    Fetches analyst comments for a detection from the undocumented /frontend/comments
+    endpoint used by the ESET Inspect React GUI.
+
+    Returns two values via a small hashtable:
+      .text  — all comments concatenated into a single string suitable for CSV
+               Format: "[2026-03-11 10:04 | eset_user] Test comment text | [...]"
+      .array — the raw array of comment objects for JSON export
+    #>
+    param([string]$DetectionId, [hashtable]$Headers)
+
+    $result = @{ text = ""; array = @() }
+
+    try {
+        $body = @{ objectId = [int]$DetectionId; objectType = 1 }
+        $splat = New-ApiSplat -Uri "$("https://$($script:cfg_Server)")/frontend/comments" `
+                              -Method "POST" -Headers $Headers -Body $body
+        $resp = Invoke-RestMethod @splat
+
+        if ($null -eq $resp -or $resp.Count -eq 0) { return $result }
+
+        # Build a flat array of clean comment objects
+        $comments = @($resp | ForEach-Object {
+            $editedSuffix = if ($null -ne (Get-Prop $_ 'lastEditTime')) { " [edited]" } else { "" }
+            [PSCustomObject]@{
+                commentId    = Get-Prop $_ 'commentId'
+                authorName   = Get-Prop $_ 'authorName'
+                authorUuid   = Get-Prop $_ 'authorUuid'
+                creationTime = Get-Prop $_ 'creationTime'
+                lastEditTime = Get-Prop $_ 'lastEditTime'
+                comment      = (Get-Prop $_ 'commentValue' '')
+                edited       = ($null -ne (Get-Prop $_ 'lastEditTime'))
+            }
+        })
+
+        # CSV-friendly single string: "[date | author] text  |  [date | author] text"
+        $text = ($comments | ForEach-Object {
+            $ts = if ($_.creationTime) { ([datetime]$_.creationTime).ToString('yyyy-MM-dd HH:mm') } else { "?" }
+            "[$ts | $($_.authorName)] $($_.comment)"
+        }) -join "  |  "
+
+        $result.text  = $text
+        $result.array = $comments
+
+    } catch {
+        Write-Log "  Comments fetch failed for id=$DetectionId : $_" "WARN"
+    }
+
+    return $result
 }
 
 #region ── Entry point ────────────────────────────────────────────────────────────
@@ -1185,40 +1239,14 @@ try {
                 -Status "$fetched / $($allDetections.Count)  |  id=$detId  |  errors=$detailErrors" `
                 -PercentComplete ([int]($fetched/$allDetections.Count*100))
             try {
-                $detail = Invoke-ApiCall -Uri "$baseUrl/api/v1/detections/$detId" -Headers $authHeaders
-
-                # ── Comments endpoint probe (runs only on the first detection) ──────────
-                # The GUI shows a Comments section with multiple entries — not the note field.
-                # We need to find the undocumented endpoint. Try common REST patterns.
-                if ($fetched -eq 1) {
-                    Write-Log "PROBE: Searching for comments endpoint on detection id=$detId..." "DEBUG"
-                    $candidateUrls = @(
-                        "$baseUrl/api/v1/detections/$detId/comments",
-                        "$baseUrl/api/v1/detections/$detId/notes",
-                        "$baseUrl/api/v1/detections/$detId/activities",
-                        "$baseUrl/api/v1/detections/$detId/history",
-                        "$baseUrl/api/v1/detections/$detId/audit",
-                        "$baseUrl/api/v2/detections/$detId/comments",
-                        "$baseUrl/api/v2/detections/$detId/notes"
-                    )
-                    foreach ($url in $candidateUrls) {
-                        try {
-                            $probe = Invoke-ApiCall -Uri $url -Headers $authHeaders
-                            Write-Log "PROBE HIT  : $url" "DEBUG"
-                            Write-Log "PROBE RESP : $($probe | ConvertTo-Json -Depth 5 -Compress)" "DEBUG"
-                        } catch {
-                            $probeStatus = if ($_ -match 'HTTP (\d+)') { $Matches[1] } else { "ERR" }
-                            Write-Log "PROBE MISS : $url  ($probeStatus)" "DEBUG"
-                        }
-                    }
-                }
-                # ── End probe ─────────────────────────────────────────────────────────────
-
-                $enriched.Add((ConvertTo-FlatDetection $detail))
+                $detail   = Invoke-ApiCall -Uri "$baseUrl/api/v1/detections/$detId" -Headers $authHeaders
+                $comments = Get-DetectionComments -DetectionId $detId -Headers $authHeaders
+                $enriched.Add((ConvertTo-FlatDetection $detail $comments))
             } catch {
                 $detailErrors++
                 Write-Log "  Detail fetch FAILED for id=$detId : $_ — using list data." "WARN"
-                $enriched.Add((ConvertTo-FlatDetection $det))
+                $comments = @{ text = ""; array = @() }
+                $enriched.Add((ConvertTo-FlatDetection $det $comments))
             }
             if ($script:cfg_DetailDelayMs -gt 0) { Start-Sleep -Milliseconds $script:cfg_DetailDelayMs }
         }
@@ -1229,8 +1257,10 @@ try {
             Write-Log "All detail fetches completed successfully." "OK"
         }
     } else {
-        Write-Log "FetchDetails=false — note/comment fields will be empty." "WARN"
-        foreach ($det in $allDetections) { $enriched.Add((ConvertTo-FlatDetection $det)) }
+        Write-Log "FetchDetails=false — detail-only fields and comments will be empty." "WARN"
+        foreach ($det in $allDetections) {
+            $enriched.Add((ConvertTo-FlatDetection $det @{ text = ""; array = @() }))
+        }
     }
 
     Write-Log "$($enriched.Count) detection(s) ready for export." "OK"
