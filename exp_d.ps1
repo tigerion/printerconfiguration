@@ -25,7 +25,7 @@
     Passwords in the config are stored as a DPAPI-encrypted Base64 string (Windows only).
     Use -SavePassword to encrypt and write your password to the config file.
     On non-Windows systems (PS 7+ on Linux/macOS) plaintext passwords are not supported in
-    the config for security reasons — you will always be prompted interactively.
+    the config for security reasons -- you will always be prompted interactively.
 
     GENERATE A CONFIG FILE
     ----------------------
@@ -73,7 +73,7 @@
 .PARAMETER SavePassword
     Encrypt the password (prompted securely) using Windows DPAPI and save it to the config file.
     The encrypted value is tied to the current Windows user account and machine.
-    Exits after saving — does not run an export.
+    Exits after saving -- does not run an export.
 
 .PARAMETER Force
     Allow -GenerateConfig to overwrite an existing config file.
@@ -87,7 +87,7 @@
 
 .PARAMETER Password
     Optional. If omitted you are prompted with a masked secure input (recommended).
-    Avoid passing on the command line — it appears in shell history.
+    Avoid passing on the command line -- it appears in shell history.
     Can be stored encrypted in the config file via -SavePassword.
 
 .PARAMETER Domain
@@ -157,7 +157,7 @@
     .\Export-EsetInspectDetections.ps1 -ConfigFile ".\prod-eset.json" -DaysBack 7
 
 .EXAMPLE
-    # Interactive — prompts for password securely (no config file)
+    # Interactive -- prompts for password securely (no config file)
     .\Export-EsetInspectDetections.ps1 -Server "inspect.corp.local" -Username "Administrator"
 
 .EXAMPLE
@@ -169,7 +169,7 @@
 .PARAMETER SaveConfig
     After a successful export, write all effective settings to the config file so you
     never have to type them again. The password is encrypted with DPAPI and stored as
-    EncryptedPassword. Existing config values are merged — only supplied parameters are
+    EncryptedPassword. Existing config values are merged -- only supplied parameters are
     overwritten, so you can safely run with -SaveConfig on any run without losing other
     stored settings.
     Example: run once with all your flags plus -SaveConfig, then run with no arguments forever.
@@ -182,7 +182,7 @@
 
 [CmdletBinding(SupportsShouldProcess, DefaultParameterSetName = "Run")]
 param(
-    # ── Config file control ───────────────────────────────────────────────────
+    # -- Config file control ---------------------------------------------------
     [Parameter(ParameterSetName = "Run",            Mandatory = $false)]
     [Parameter(ParameterSetName = "GenerateConfig", Mandatory = $false)]
     [Parameter(ParameterSetName = "SavePassword",   Mandatory = $false)]
@@ -200,7 +200,7 @@ param(
     [Parameter(ParameterSetName = "Run", Mandatory = $false)]
     [switch]$SaveConfig,
 
-    # ── Connection ────────────────────────────────────────────────────────────
+    # -- Connection ------------------------------------------------------------
     [Parameter(ParameterSetName = "Run", Mandatory = $false)]
     [string]$Server = "",
 
@@ -213,7 +213,7 @@ param(
     [Parameter(ParameterSetName = "Run", Mandatory = $false)]
     [object]$Domain = $null,          # $null = "not provided by user"
 
-    # ── Export settings ───────────────────────────────────────────────────────
+    # -- Export settings -------------------------------------------------------
     [Parameter(ParameterSetName = "Run", Mandatory = $false)]
     [string]$OutputPath = "",
 
@@ -228,7 +228,7 @@ param(
     [Parameter(ParameterSetName = "Run", Mandatory = $false)]
     [string]$Filter = "",
 
-    # ── Tuning ────────────────────────────────────────────────────────────────
+    # -- Tuning ----------------------------------------------------------------
     [Parameter(ParameterSetName = "Run", Mandatory = $false)]
     [ValidateRange(1, 1000)]
     [int]$PageSize = -1,              # -1 = "not provided by user"
@@ -254,7 +254,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-# ── Script-scoped state ──────────────────────────────────────────────────────
+# -- Script-scoped state ------------------------------------------------------
 $script:RunStart        = Get-Date
 $script:AuthTime        = $null
 $script:ExitCode        = 0
@@ -264,7 +264,7 @@ $script:NullDebugWritten = $false   # write null-field debug file only once per 
 # Resolve the default config path (same directory as the script)
 $script:DefaultConfigPath = Join-Path $PSScriptRoot "eset-config.json"
 
-#region ── Logging ───────────────────────────────────────────────────────────────
+#region -- Logging ---------------------------------------------------------------
 
 function Write-Log {
     param(
@@ -286,11 +286,11 @@ function Write-Log {
 
 #endregion
 
-#region ── Config file ───────────────────────────────────────────────────────────
+#region -- Config file -----------------------------------------------------------
 
 # Template written by -GenerateConfig
 $script:ConfigTemplate = [ordered]@{
-    "_comment"             = "ESET Inspect On-Prem Detection Exporter — config file. All fields are optional; command-line arguments always override these values."
+    "_comment"             = "ESET Inspect On-Prem Detection Exporter -- config file. All fields are optional; command-line arguments always override these values."
     "Server"               = ""
     "Username"             = ""
     "EncryptedPassword"    = ""
@@ -355,7 +355,7 @@ function Invoke-SavePassword {
         exit 1
     }
 
-    # Encrypt with DPAPI (current user scope — only decryptable by same user on same machine)
+    # Encrypt with DPAPI (current user scope -- only decryptable by same user on same machine)
     $bytes     = [System.Text.Encoding]::UTF8.GetBytes($plain)
     $encrypted = [System.Security.Cryptography.ProtectedData]::Protect(
         $bytes, $null,
@@ -363,7 +363,7 @@ function Invoke-SavePassword {
     )
     $encoded = [Convert]::ToBase64String($encrypted)
 
-    # Write back — preserve all existing keys, just update EncryptedPassword
+    # Write back -- preserve all existing keys, just update EncryptedPassword
     $cfg | Add-Member -MemberType NoteProperty -Name "EncryptedPassword" -Value $encoded -Force
     $cfg | ConvertTo-Json -Depth 5 | Out-File -FilePath $path -Encoding UTF8
 
@@ -385,7 +385,7 @@ function Read-Config {
 
     if (-not (Test-Path $path)) {
         if ($ConfigFile -ne "") {
-            # User explicitly specified a file that doesn't exist — warn them
+            # User explicitly specified a file that doesn't exist -- warn them
             Write-Log "Config file not found: $path" "WARN"
         }
         return @{}
@@ -403,7 +403,7 @@ function Read-Config {
     $cfg = @{}
 
     # Map each known key from the JSON object into the hashtable.
-    # Use PSObject.Properties — StrictMode throws if we use $raw.$key on a missing property.
+    # Use PSObject.Properties -- StrictMode throws if we use $raw.$key on a missing property.
     foreach ($key in @("Server","Username","Domain","OutputPath","ExportFormat",
                         "DaysBack","Filter","PageSize","FetchDetails","FlattenComments",
                         "DetailDelayMs","MaxRetries","SkipCertificateCheck")) {
@@ -413,7 +413,7 @@ function Read-Config {
         }
     }
 
-    # Decrypt password if present — also use PSObject.Properties for StrictMode safety
+    # Decrypt password if present -- also use PSObject.Properties for StrictMode safety
     $encProp = $raw.PSObject.Properties['EncryptedPassword']
     if ($null -ne $encProp -and -not [string]::IsNullOrWhiteSpace($encProp.Value)) {
         try {
@@ -451,7 +451,7 @@ function Merge-Config {
     #>
     param([hashtable]$Cfg)
 
-    # ── Helper: pick first non-null/non-sentinel value from: CLI arg, config, default ──
+    # -- Helper: pick first non-null/non-sentinel value from: CLI arg, config, default --
     function Resolve-Str  { param($cli, $key, $default) if ($cli -ne "")  { $cli } elseif ($Cfg.ContainsKey($key) -and $Cfg[$key] -ne "") { $Cfg[$key] } else { $default } }
     function Resolve-Int  { param($cli, $key, $default) if ($cli -ne -1)  { $cli } elseif ($Cfg.ContainsKey($key))                        { [int]$Cfg[$key] }   else { $default } }
     function Resolve-Bool { param($cli, $key, $default) if ($null -ne $cli -and $cli -isnot [string]) { [bool]$cli } elseif ($Cfg.ContainsKey($key)) { [bool]$Cfg[$key] } else { $default } }
@@ -483,7 +483,7 @@ function Merge-Config {
 
 #endregion
 
-#region ── TLS ───────────────────────────────────────────────────────────────────
+#region -- TLS -------------------------------------------------------------------
 
 function Import-DpapiAssembly {
     # System.Security assembly must be explicitly loaded in PS 5.1
@@ -519,7 +519,7 @@ public class EsetTrustAll : ICertificatePolicy {
 
 #endregion
 
-#region ── Pre-flight ────────────────────────────────────────────────────────────
+#region -- Pre-flight ------------------------------------------------------------
 
 function Test-ServerReachable {
     param([string]$Hostname)
@@ -561,7 +561,7 @@ function Test-FilterSyntax {
         Write-Log ("Filter pre-validation WARNING: unrecognised token(s): " +
                    "'$($unknowns -join "', '")'." +
                    " Allowed filter fields: $($allowedFields -join ', ')." +
-                   " Proceeding — the server will reject an invalid expression.") "WARN"
+                   " Proceeding -- the server will reject an invalid expression.") "WARN"
     } else {
         Write-Log "Filter expression pre-validation passed." "OK"
     }
@@ -570,7 +570,7 @@ function Test-FilterSyntax {
 function Assert-OutputWritable {
     param([string]$Dir)
     if (-not (Test-Path $Dir)) {
-        Write-Log "Output directory does not exist — creating: $Dir"
+        Write-Log "Output directory does not exist -- creating: $Dir"
         try {
             New-Item -ItemType Directory -Path $Dir -Force | Out-Null
             Write-Log "Directory created." "OK"
@@ -590,7 +590,7 @@ function Assert-OutputWritable {
 
 #endregion
 
-#region ── API core (with retry) ─────────────────────────────────────────────────
+#region -- API core (with retry) -------------------------------------------------
 
 function New-ApiSplat {
     param([string]$Uri, [string]$Method = "GET", [hashtable]$Headers = @{}, [object]$Body = $null)
@@ -629,7 +629,7 @@ function Invoke-ApiCall {
             }
             $isRetryable = ($status -eq 429) -or ($status -ge 500) -or ($status -eq 0)
             if (-not $isRetryable -or $attempt -ge $script:cfg_MaxRetries) {
-                $msg = "API call failed (HTTP $status) — URI: $Uri"
+                $msg = "API call failed (HTTP $status) -- URI: $Uri"
                 if ($body) { $msg += "`n  Server response: $body" }
                 throw $msg
             }
@@ -652,7 +652,7 @@ function Invoke-ApiCall {
 
 #endregion
 
-#region ── Authentication ────────────────────────────────────────────────────────
+#region -- Authentication --------------------------------------------------------
 
 function Invoke-Authenticate {
     param([string]$Pwd)
@@ -686,7 +686,7 @@ function Invoke-Authenticate {
     }
 
     if ($resp.StatusCode -ne 200) {
-        throw "Authentication returned HTTP $($resp.StatusCode) — expected 200."
+        throw "Authentication returned HTTP $($resp.StatusCode) -- expected 200."
     }
 
     $token = $null
@@ -703,7 +703,7 @@ function Invoke-Authenticate {
         throw "X-Security-Token appears too short (length=$($token.Length)). Value: '$token'"
     }
 
-    Write-Log "Authentication SUCCESS — session token received (length=$($token.Length))." "OK"
+    Write-Log "Authentication SUCCESS -- session token received (length=$($token.Length))." "OK"
     $script:AuthTime = Get-Date
     return $token
 }
@@ -717,7 +717,7 @@ function Test-TokenAge {
 
 #endregion
 
-#region ── Detection helpers ─────────────────────────────────────────────────────
+#region -- Detection helpers -----------------------------------------------------
 
 $script:DetectionTypeMap = @{
     0 = "UnknownAlarm";    1 = "RuleActivated";        2 = "MalwareFoundOnDisk"
@@ -738,7 +738,7 @@ function Get-Prop {
         Safely read a property from a PSCustomObject under Set-StrictMode -Version Latest.
     .DESCRIPTION
         StrictMode throws a PropertyNotFoundException when accessing a missing property.
-        The ESET API does not guarantee every field is present in every response — fields
+        The ESET API does not guarantee every field is present in every response -- fields
         vary by detection type and between the list and detail endpoints.
         Returns $Default ($null unless overridden) for any absent or null property.
     #>
@@ -766,9 +766,9 @@ function Resolve-DetectionObject {
     if ($null -eq $Raw) { return $null }
     $wrapper = $Raw.PSObject.Properties['DETECTION']
     if ($null -ne $wrapper -and $null -ne $wrapper.Value) {
-        return $wrapper.Value   # detail endpoint — unwrap
+        return $wrapper.Value   # detail endpoint -- unwrap
     }
-    return $Raw                 # list endpoint — already flat
+    return $Raw                 # list endpoint -- already flat
 }
 
 function ConvertTo-FlatDetection {
@@ -777,13 +777,13 @@ function ConvertTo-FlatDetection {
     # Unwrap detail-endpoint wrapper if present
     $D = Resolve-DetectionObject $Raw
 
-    # Numeric fields — coerce safely; missing or non-numeric becomes sentinel default
+    # Numeric fields -- coerce safely; missing or non-numeric becomes sentinel default
     $typeId  = try { [int](Get-Prop $D 'type'               -1) } catch { -1 }
     $sigType = try { [int](Get-Prop $D 'moduleSignatureType' -1) } catch { -1 }
     $score   = try { [int](Get-Prop $D 'severityScore'        0) } catch {  0 }
     $handled = try { [int](Get-Prop $D 'handled'              0) } catch {  0 }
 
-    # Resolve computerIp BEFORE the hashtable — PS cannot parse try/catch as hash values.
+    # Resolve computerIp BEFORE the hashtable -- PS cannot parse try/catch as hash values.
     # The API returns computerIp in two different shapes depending on endpoint:
     #   List endpoint   : single PSCustomObject { ipv4Addresses=[]; ipv6Addresses=[]; macAddress="" }
     #   Detail endpoint : System.Object[] where each element is a PSCustomObject { ipv4Addresses=[]; ... }
@@ -826,7 +826,7 @@ function ConvertTo-FlatDetection {
         moduleFirstSeenLocally    = Get-Prop $D 'moduleFirstSeenLocally'
         moduleLastExecutedLocally = Get-Prop $D 'moduleLastExecutedLocally'
 
-        # ── Computer ──────────────────────────────────────────────────────────
+        # -- Computer ----------------------------------------------------------
         computerId                = Get-Prop $D 'computerId'
         computerName              = Get-Prop $D 'computerName'
         computerUuid              = Get-Prop $D 'computerUuid'
@@ -895,7 +895,7 @@ function ConvertTo-FlatDetection {
             try {
                 $lines = [System.Collections.Generic.List[string]]::new()
                 $lines.Add("=" * 70)
-                $lines.Add("ESET Inspect — Null Field Debug Report")
+                $lines.Add("ESET Inspect -- Null Field Debug Report")
                 $lines.Add("Generated : $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')")
                 $lines.Add("Detection : id=$(Get-Prop $D 'id')  uuid=$(Get-Prop $D 'uuid')")
                 $lines.Add("=" * 70)
@@ -931,7 +931,7 @@ function ConvertTo-FlatDetection {
                 $lines.Add("=" * 70)
 
                 $lines | Out-File -FilePath $debugPath -Encoding UTF8
-                Write-Log "Unexpected null fields detected — debug report: $debugPath" "WARN"
+                Write-Log "Unexpected null fields detected -- debug report: $debugPath" "WARN"
                 Write-Log "  Null fields: $($nullFields -join ', ')" "WARN"
             } catch {
                 Write-Log "Could not write null-field debug file: $_" "WARN"
@@ -944,7 +944,7 @@ function ConvertTo-FlatDetection {
 
 #endregion
 
-#region ── Output helpers ────────────────────────────────────────────────────────
+#region -- Output helpers --------------------------------------------------------
 
 function Get-SafeOutputPath {
     param([string]$Dir, [string]$Base, [string]$Ext)
@@ -990,7 +990,7 @@ function Invoke-SaveConfig {
     - Called automatically after a successful export when -SaveConfig is specified.
     - Merges into any existing config rather than overwriting unrelated keys.
     - Password is encrypted with DPAPI (Windows) so it is never stored in plaintext.
-    - DaysBack and Filter are intentionally NOT saved — they are run-specific values
+    - DaysBack and Filter are intentionally NOT saved -- they are run-specific values
       that you almost always want to choose fresh each time.
     #>
     param([string]$PlaintextPassword)
@@ -1011,11 +1011,11 @@ function Invoke-SaveConfig {
     }
 
     # Stamp comment and version
-    $cfg['_comment']       = "ESET Inspect On-Prem Detection Exporter — config file. All fields are optional; command-line arguments always override these values."
+    $cfg['_comment']       = "ESET Inspect On-Prem Detection Exporter -- config file. All fields are optional; command-line arguments always override these values."
     $cfg['_savedAt']       = (Get-Date).ToString('o')
     $cfg['_scriptVersion'] = "3.0"
 
-    # Write every effective setting (skip DaysBack and Filter — run-specific)
+    # Write every effective setting (skip DaysBack and Filter -- run-specific)
     $cfg['Server']               = $script:cfg_Server
     $cfg['Username']             = $script:cfg_Username
     $cfg['Domain']               = $script:cfg_Domain
@@ -1031,7 +1031,7 @@ function Invoke-SaveConfig {
     # Encrypt and save password if we have a plaintext copy (only available on this run)
     if (-not [string]::IsNullOrWhiteSpace($PlaintextPassword)) {
         if ($PSVersionTable.PSVersion.Major -ge 6 -and $PSVersionTable.Platform -ne "Win32NT") {
-            Write-Log "DPAPI not available on this OS — password will not be saved to config." "WARN"
+            Write-Log "DPAPI not available on this OS -- password will not be saved to config." "WARN"
         } else {
             try {
                 Import-DpapiAssembly
@@ -1064,9 +1064,9 @@ function Get-DetectionComments {
     endpoint used by the ESET Inspect React GUI.
 
     Returns two values via a small hashtable:
-      .text  — all comments concatenated into a single string suitable for CSV
+      .text  -- all comments concatenated into a single string suitable for CSV
                Format: "[2026-03-11 10:04 | eset_user] Test comment text | [...]"
-      .array — the raw array of comment objects for JSON export
+      .array -- the raw array of comment objects for JSON export
     #>
     param([string]$DetectionId, [hashtable]$Headers)
 
@@ -1110,17 +1110,17 @@ function Get-DetectionComments {
     return $result
 }
 
-#region ── Entry point ────────────────────────────────────────────────────────────
+#region -- Entry point ------------------------------------------------------------
 
 # Handle utility modes before doing anything else
 if ($GenerateConfig) { Invoke-GenerateConfig }
 if ($SavePassword)   { Invoke-SavePassword   }
 
-# ── Load and merge config ────────────────────────────────────────────────────
+# -- Load and merge config ----------------------------------------------------
 $fileCfg = Read-Config
 Merge-Config -Cfg $fileCfg
 
-# ── From here, use $script:cfg_* variables exclusively ──────────────────────
+# -- From here, use $script:cfg_* variables exclusively ----------------------
 
 $detailErrors  = 0
 $totalCount    = 0
@@ -1132,17 +1132,17 @@ $baseName      = "ESET_Inspect_Detections_$timestamp"
 
 try {
 
-    # ═══════════════════════════════════════════════════════════════
-    # STEP 0 — Banner
-    # ═══════════════════════════════════════════════════════════════
+    # ===============================================================
+    # STEP 0 -- Banner
+    # ===============================================================
     Write-Log "======================================================"
     Write-Log " ESET Inspect On-Prem -- Detection Exporter v3.0"
     Write-Log " Started : $($script:RunStart.ToString('yyyy-MM-dd HH:mm:ss'))"
     Write-Log "======================================================"
 
-    # ═══════════════════════════════════════════════════════════════
-    # STEP 1 — Validate resolved settings
-    # ═══════════════════════════════════════════════════════════════
+    # ===============================================================
+    # STEP 1 -- Validate resolved settings
+    # ===============================================================
 
     if ([string]::IsNullOrWhiteSpace($script:cfg_Server)) {
         throw ("Server is required. Supply it via -Server, or set it in the config file at: " +
@@ -1166,7 +1166,7 @@ try {
     Write-Log "Server        : $($script:cfg_Server)"
     Write-Log "Username      : $($script:cfg_Username)"
     Write-Log "Domain auth   : $($script:cfg_Domain)"
-    Write-Log "Filter        : $(if ($script:cfg_Filter) { $script:cfg_Filter } else { '(none — all detections)' })"
+    Write-Log "Filter        : $(if ($script:cfg_Filter) { $script:cfg_Filter } else { '(none -- all detections)' })"
     Write-Log "FetchDetails  : $($script:cfg_FetchDetails)"
     Write-Log "FlattenComments: $($script:cfg_FlattenComments)"
     Write-Log "ExportFormat  : $($script:cfg_ExportFormat)"
@@ -1174,35 +1174,35 @@ try {
     Write-Log "PageSize      : $($script:cfg_PageSize)  |  MaxRetries: $($script:cfg_MaxRetries)  |  DetailDelayMs: $($script:cfg_DetailDelayMs)"
     Write-Log "------------------------------------------------------"
 
-    # ═══════════════════════════════════════════════════════════════
-    # STEP 2 — TLS
-    # ═══════════════════════════════════════════════════════════════
+    # ===============================================================
+    # STEP 2 -- TLS
+    # ===============================================================
     if ($script:cfg_SkipCertificateCheck) {
         Enable-TlsBypass
         Write-Log "TLS certificate verification DISABLED (SkipCertificateCheck=true)." "WARN"
     }
 
-    # ═══════════════════════════════════════════════════════════════
-    # STEP 3 — Filter pre-validation
-    # ═══════════════════════════════════════════════════════════════
+    # ===============================================================
+    # STEP 3 -- Filter pre-validation
+    # ===============================================================
     Test-FilterSyntax -F $script:cfg_Filter
 
-    # ═══════════════════════════════════════════════════════════════
-    # STEP 4 — Output directory writability
-    # ═══════════════════════════════════════════════════════════════
+    # ===============================================================
+    # STEP 4 -- Output directory writability
+    # ===============================================================
     Assert-OutputWritable -Dir $script:cfg_OutputPath
 
-    # ═══════════════════════════════════════════════════════════════
-    # STEP 5 — Network pre-flight
-    # ═══════════════════════════════════════════════════════════════
+    # ===============================================================
+    # STEP 5 -- Network pre-flight
+    # ===============================================================
     if (-not (Test-ServerReachable -Hostname $script:cfg_Server)) {
         throw ("Server '$($script:cfg_Server)' is not reachable on TCP 443. " +
                "Verify hostname/IP, firewall rules, and that ESET Inspect is running.")
     }
 
-    # ═══════════════════════════════════════════════════════════════
-    # STEP 6 — Password (prompt if not in config or CLI)
-    # ═══════════════════════════════════════════════════════════════
+    # ===============================================================
+    # STEP 6 -- Password (prompt if not in config or CLI)
+    # ===============================================================
     if ([string]::IsNullOrEmpty($script:cfg_Password)) {
         $secPwd              = Read-Host -Prompt "Password for '$($script:cfg_Username)'" -AsSecureString
         $bstr                = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($secPwd)
@@ -1215,9 +1215,9 @@ try {
         throw "Password cannot be empty."
     }
 
-    # ═══════════════════════════════════════════════════════════════
-    # STEP 7 — Authenticate
-    # ═══════════════════════════════════════════════════════════════
+    # ===============================================================
+    # STEP 7 -- Authenticate
+    # ===============================================================
     Write-Log "Authenticating as '$($script:cfg_Username)' on '$($script:cfg_Server)'..."
     $token               = Invoke-Authenticate -Pwd $script:cfg_Password
     # Capture plaintext for -SaveConfig BEFORE zeroing (needs to re-encrypt it)
@@ -1227,9 +1227,9 @@ try {
     $authHeaders         = @{ "Authorization" = "Bearer $token" }
     $baseUrl             = "https://$($script:cfg_Server)"
 
-    # ═══════════════════════════════════════════════════════════════
-    # STEP 8 — Total count
-    # ═══════════════════════════════════════════════════════════════
+    # ===============================================================
+    # STEP 8 -- Total count
+    # ===============================================================
     Write-Log "Querying total detection count..."
     $countQuery = "`$count=1"
     if ($script:cfg_Filter) { $countQuery += "&`$filter=$([Uri]::EscapeDataString($script:cfg_Filter))" }
@@ -1249,9 +1249,9 @@ try {
         exit 0
     }
 
-    # ═══════════════════════════════════════════════════════════════
-    # STEP 9 — Paginate
-    # ═══════════════════════════════════════════════════════════════
+    # ===============================================================
+    # STEP 9 -- Paginate
+    # ===============================================================
     $pageCount = [Math]::Ceiling($totalCount / $script:cfg_PageSize)
     Write-Log "Fetching $totalCount detection(s) across $pageCount page(s)..."
 
@@ -1264,7 +1264,7 @@ try {
         $pageResp  = Invoke-ApiCall -Uri "$baseUrl/api/v1/detections?$query" -Headers $authHeaders
         $valueProp = if ($null -ne $pageResp) { $pageResp.PSObject.Properties['value'] } else { $null }
         if ($null -eq $valueProp -or $null -eq $valueProp.Value) {
-            Write-Log "Page $($page+1) returned no data — skipping." "WARN"
+            Write-Log "Page $($page+1) returned no data -- skipping." "WARN"
             continue
         }
         $allDetections.AddRange([object[]]$valueProp.Value)
@@ -1278,16 +1278,16 @@ try {
 
     if ($allDetections.Count -eq 0) { Write-Log "0 detections returned despite count=$totalCount." "WARN"; exit 0 }
 
-    # ═══════════════════════════════════════════════════════════════
-    # STEP 10 — Detail fetch
-    # ═══════════════════════════════════════════════════════════════
+    # ===============================================================
+    # STEP 10 -- Detail fetch
+    # ===============================================================
     if ($script:cfg_FetchDetails) {
         Write-Log "Fetching per-detection detail for analyst notes and extra fields..."
         $fetched = 0
         foreach ($det in $allDetections) {
             Test-TokenAge
             $fetched++
-            # Get-Prop is StrictMode-safe — won't throw if 'id' is absent
+            # Get-Prop is StrictMode-safe -- won't throw if 'id' is absent
             $detId = Get-Prop $det 'id' '(unknown)'
             Write-Progress -Id 2 -Activity "Fetching detection details" `
                 -Status "$fetched / $($allDetections.Count)  |  id=$detId  |  errors=$detailErrors" `
@@ -1298,7 +1298,7 @@ try {
                 $enriched.Add((ConvertTo-FlatDetection $detail $comments))
             } catch {
                 $detailErrors++
-                Write-Log "  Detail fetch FAILED for id=$detId : $_ — using list data." "WARN"
+                Write-Log "  Detail fetch FAILED for id=$detId : $_ -- using list data." "WARN"
                 $comments = @{ text = ""; array = @() }
                 $enriched.Add((ConvertTo-FlatDetection $det $comments))
             }
@@ -1311,7 +1311,7 @@ try {
             Write-Log "All detail fetches completed successfully." "OK"
         }
     } else {
-        Write-Log "FetchDetails=false — detail-only fields and comments will be empty." "WARN"
+        Write-Log "FetchDetails=false -- detail-only fields and comments will be empty." "WARN"
         foreach ($det in $allDetections) {
             $enriched.Add((ConvertTo-FlatDetection $det @{ text = ""; array = @() }))
         }
@@ -1319,13 +1319,13 @@ try {
 
     Write-Log "$($enriched.Count) detection(s) ready for export." "OK"
 
-    # ═══════════════════════════════════════════════════════════════
-    # STEP 10b — Flatten comments (if requested)
-    # ═══════════════════════════════════════════════════════════════
+    # ===============================================================
+    # STEP 10b -- Flatten comments (if requested)
+    # ===============================================================
     if ($script:cfg_FlattenComments) {
         Write-Log "Flattening comments into numbered columns for Excel compatibility..."
 
-        # First pass — find the maximum number of comments across all detections
+        # First pass -- find the maximum number of comments across all detections
         $maxComments = 0
         foreach ($det in $enriched) {
             $arr = $det.PSObject.Properties['commentsArray']
@@ -1337,7 +1337,7 @@ try {
         Write-Log "  Max comments on a single detection: $maxComments"
 
         if ($maxComments -gt 0) {
-            # Second pass — rebuild each detection object with flat comment columns
+            # Second pass -- rebuild each detection object with flat comment columns
             $flatEnriched = [System.Collections.Generic.List[object]]::new($enriched.Count)
             foreach ($det in $enriched) {
                 # Copy all existing properties except commentsArray
@@ -1364,18 +1364,18 @@ try {
             $enriched = $flatEnriched
             Write-Log "Comments flattened into $maxComments column group(s) (comment1_author/time/text, comment2_..., etc.)." "OK"
         } else {
-            Write-Log "No comments found — skipping flatten, commentsArray will be empty." "WARN"
+            Write-Log "No comments found -- skipping flatten, commentsArray will be empty." "WARN"
         }
     }
 
-    # ═══════════════════════════════════════════════════════════════
-    # STEP 11 — Export
-    # ═══════════════════════════════════════════════════════════════
+    # ===============================================================
+    # STEP 11 -- Export
+    # ===============================================================
     Export-Detections -Data $enriched -Base $baseName -Dir $script:cfg_OutputPath -Format $script:cfg_ExportFormat
 
-    # ═══════════════════════════════════════════════════════════════
-    # STEP 11b — Save config (if requested)
-    # ═══════════════════════════════════════════════════════════════
+    # ===============================================================
+    # STEP 11b -- Save config (if requested)
+    # ===============================================================
     if ($SaveConfig) {
         Write-Log "Saving current settings to config file (-SaveConfig)..."
         Invoke-SaveConfig -PlaintextPassword $pwdForSave
@@ -1383,9 +1383,9 @@ try {
         $pwdForSave = "x" * $pwdForSave.Length; $pwdForSave = ""
     }
 
-    # ═══════════════════════════════════════════════════════════════
-    # STEP 12 — Run log
-    # ═══════════════════════════════════════════════════════════════
+    # ===============================================================
+    # STEP 12 -- Run log
+    # ===============================================================
     Save-RunLog -Dir $script:cfg_OutputPath -Base $baseName -Meta @{
         scriptVersion     = "3.0"
         configFile        = (Get-ConfigPath)
@@ -1409,9 +1409,9 @@ try {
         exitCode          = $script:ExitCode
     }
 
-    # ═══════════════════════════════════════════════════════════════
-    # STEP 13 — Summary
-    # ═══════════════════════════════════════════════════════════════
+    # ===============================================================
+    # STEP 13 -- Summary
+    # ===============================================================
     $duration = [int]((Get-Date) - $script:RunStart).TotalSeconds
     Write-Log "======================================================"
     Write-Log " Export complete in ${duration} second(s)"
