@@ -387,22 +387,25 @@ function Read-Config {
 
     $cfg = @{}
 
-    # Map each known key from the JSON object into the hashtable
+    # Map each known key from the JSON object into the hashtable.
+    # Use PSObject.Properties — StrictMode throws if we use $raw.$key on a missing property.
     foreach ($key in @("Server","Username","Domain","OutputPath","ExportFormat",
                         "DaysBack","Filter","PageSize","FetchDetails",
                         "DetailDelayMs","MaxRetries","SkipCertificateCheck")) {
-        if ($null -ne $raw.$key -and "$($raw.$key)" -ne "") {
-            $cfg[$key] = $raw.$key
+        $prop = $raw.PSObject.Properties[$key]
+        if ($null -ne $prop -and $null -ne $prop.Value -and "$($prop.Value)" -ne "") {
+            $cfg[$key] = $prop.Value
         }
     }
 
-    # Decrypt password if present
-    if (-not [string]::IsNullOrWhiteSpace($raw.EncryptedPassword)) {
+    # Decrypt password if present — also use PSObject.Properties for StrictMode safety
+    $encProp = $raw.PSObject.Properties['EncryptedPassword']
+    if ($null -ne $encProp -and -not [string]::IsNullOrWhiteSpace($encProp.Value)) {
         try {
             if ($PSVersionTable.PSVersion.Major -ge 6 -and $PSVersionTable.Platform -ne "Win32NT") {
                 Write-Log "EncryptedPassword found in config but DPAPI is not available on this OS. You will be prompted for your password." "WARN"
             } else {
-                $bytes = [Convert]::FromBase64String($raw.EncryptedPassword)
+                $bytes = [Convert]::FromBase64String($encProp.Value)
                 $decrypted = [System.Security.Cryptography.ProtectedData]::Unprotect(
                     $bytes, $null,
                     [System.Security.Cryptography.DataProtectionScope]::CurrentUser
