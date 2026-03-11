@@ -242,10 +242,11 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 # ── Script-scoped state ──────────────────────────────────────────────────────
-$script:RunStart = Get-Date
-$script:AuthTime = $null
-$script:ExitCode = 0
-$script:RunLog   = [System.Collections.Generic.List[hashtable]]::new()
+$script:RunStart        = Get-Date
+$script:AuthTime        = $null
+$script:ExitCode        = 0
+$script:RunLog          = [System.Collections.Generic.List[hashtable]]::new()
+$script:NullDebugWritten = $false   # write null-field debug file only once per run
 
 # Resolve the default config path (same directory as the script)
 $script:DefaultConfigPath = Join-Path $PSScriptRoot "eset-config.json"
@@ -705,17 +706,13 @@ function Get-Prop {
     .SYNOPSIS
         Safely read a property from a PSCustomObject under Set-StrictMode -Version Latest.
     .DESCRIPTION
-        StrictMode throws a PropertyNotFoundException when you access a property that does
-        not exist on an object. The ESET API does not guarantee every field is present in
-        every response (e.g. moduleFirstSeenLocally only appears in the detail endpoint,
-        and some fields are absent for certain detection types).
-
-        This helper returns $null for any missing or unreadable property instead of throwing,
-        keeping ConvertTo-FlatDetection safe regardless of what the API returns.
+        StrictMode throws a PropertyNotFoundException when accessing a missing property.
+        The ESET API does not guarantee every field is present in every response — fields
+        vary by detection type and between the list and detail endpoints.
+        Returns $Default ($null unless overridden) for any absent or null property.
     #>
     param([PSCustomObject]$Obj, [string]$Name, $Default = $null)
     if ($null -eq $Obj) { return $Default }
-    # PSObject.Properties is the StrictMode-safe way to test property existence
     $prop = $Obj.PSObject.Properties[$Name]
     if ($null -eq $prop) { return $Default }
     $v = $prop.Value
@@ -723,51 +720,135 @@ function Get-Prop {
     return $v
 }
 
-function ConvertTo-FlatDetection {
-    param([PSCustomObject]$D)
+function Resolve-DetectionObject {
+    <#
+    .SYNOPSIS
+        Unwrap the detection object returned by the API.
+    .DESCRIPTION
+        The list endpoint   (GET /detections)    returns each detection as a flat object.
+        The detail endpoint (GET /detections/id) wraps the detection inside a "DETECTION"
+        property: { "DETECTION": { ...fields... } }
+        This function unwraps the detail response automatically so ConvertTo-FlatDetection
+        always receives a flat detection object regardless of which endpoint produced it.
+    #>
+    param([PSCustomObject]$Raw)
+    if ($null -eq $Raw) { return $null }
+    $wrapper = $Raw.PSObject.Properties['DETECTION']
+    if ($null -ne $wrapper -and $null -ne $wrapper.Value) {
+        return $wrapper.Value   # detail endpoint — unwrap
+    }
+    return $Raw                 # list endpoint — already flat
+}
 
-    # Numeric fields — coerce safely; missing or non-numeric becomes the sentinel default
+function ConvertTo-FlatDetection {
+    param([PSCustomObject]$Raw)
+
+    # Unwrap detail-endpoint wrapper if present
+    $D = Resolve-DetectionObject $Raw
+
+    # Numeric fields — coerce safely; missing or non-numeric becomes sentinel default
     $typeId  = try { [int](Get-Prop $D 'type'               -1) } catch { -1 }
     $sigType = try { [int](Get-Prop $D 'moduleSignatureType' -1) } catch { -1 }
     $score   = try { [int](Get-Prop $D 'severityScore'        0) } catch {  0 }
+    $handled = try { [int](Get-Prop $D 'handled'              0) } catch {  0 }
 
-    [PSCustomObject]@{
+    $flat = [PSCustomObject]@{
+        # ── Identifiers ───────────────────────────────────────────────────────
         id                        = Get-Prop $D 'id'
         uuid                      = Get-Prop $D 'uuid'
+
+        # ── Timestamps ────────────────────────────────────────────────────────
         creationTime              = Get-Prop $D 'creationTime'
-        moduleFirstSeenLocally    = Get-Prop $D 'moduleFirstSeenLocally'     # detail endpoint only
-        moduleLastExecutedLocally = Get-Prop $D 'moduleLastExecutedLocally'  # detail endpoint only
+        moduleFirstSeenLocally    = Get-Prop $D 'moduleFirstSeenLocally'      # detail only
+        moduleLastExecutedLocally = Get-Prop $D 'moduleLastExecutedLocally'   # detail only
+
+        # ── Computer ──────────────────────────────────────────────────────────
         computerId                = Get-Prop $D 'computerId'
         computerName              = Get-Prop $D 'computerName'
         computerUuid              = Get-Prop $D 'computerUuid'
+        computerIp                = Get-Prop $D 'computerIp'                  # may be nested object
+
+        # ── Rule ──────────────────────────────────────────────────────────────
         ruleId                    = Get-Prop $D 'ruleId'
         ruleUuid                  = Get-Prop $D 'ruleUuid'
         ruleName                  = Get-Prop $D 'ruleName'
+
+        # ── Classification ────────────────────────────────────────────────────
         type                      = $typeId
         typeLabel                 = if ($script:DetectionTypeMap.ContainsKey($typeId)) { $script:DetectionTypeMap[$typeId] } else { "Unknown($typeId)" }
         severity                  = Get-Prop $D 'severity'
         severityScore             = $score
         severityLabel             = Get-SeverityLabel $score
         priority                  = Get-Prop $D 'priority'
+
+        # ── Status ────────────────────────────────────────────────────────────
         resolved                  = Get-Prop $D 'resolved'
-        handled                   = Get-Prop $D 'handled'                    # detail endpoint only
+        autoResolved              = Get-Prop $D 'autoResolved'
+        resolvedOccurrences       = Get-Prop $D 'resolvedOccurrences'
+        handled                   = $handled                                  # detail only
+        occurrenceCount           = Get-Prop $D 'occurrenceCount'
+        occurrences               = Get-Prop $D 'occurrences'
+
+        # ── Threat ────────────────────────────────────────────────────────────
         threatName                = Get-Prop $D 'threatName'
         threatUri                 = Get-Prop $D 'threatUri'
+
+        # ── Process ───────────────────────────────────────────────────────────
         processId                 = Get-Prop $D 'processId'
+        processUuid               = Get-Prop $D 'processUuid'
+        processEpxUuid            = Get-Prop $D 'processEpxUuid'              # detail only
+        processName               = Get-Prop $D 'processName'
         processUser               = Get-Prop $D 'processUser'
         processCommandLine        = Get-Prop $D 'processCommandLine'
-        processPath               = Get-Prop $D 'processPath'                # detail endpoint only
+        processPath               = Get-Prop $D 'processPath'                 # detail only
+        parentProcessName         = Get-Prop $D 'parentProcessName'
+
+        # ── Module / Executable ───────────────────────────────────────────────
         moduleId                  = Get-Prop $D 'moduleId'
+        moduleUuid                = Get-Prop $D 'moduleUuid'
         moduleName                = Get-Prop $D 'moduleName'
         moduleSha1                = Get-Prop $D 'moduleSha1'
+        moduleSha256              = Get-Prop $D 'moduleSha256'
         moduleSigner              = Get-Prop $D 'moduleSigner'
         moduleSignatureType       = $sigType
         moduleSignatureLabel      = if ($script:SignatureTypeMap.ContainsKey($sigType)) { $script:SignatureTypeMap[$sigType] } else { "Unknown($sigType)" }
         moduleLgAge               = Get-Prop $D 'moduleLgAge'
         moduleLgPopularity        = Get-Prop $D 'moduleLgPopularity'
         moduleLgReputation        = Get-Prop $D 'moduleLgReputation'
-        note                      = Get-Prop $D 'note'                       # detail endpoint only
+
+        # ── Analyst note / comment ────────────────────────────────────────────
+        note                      = Get-Prop $D 'note'
+
+        # ── Raw event payload (present on some detection types) ───────────────
+        event                     = Get-Prop $D 'event'
     }
+
+    # If any mapped field is null, write a one-time debug JSON so the analyst can
+    # inspect the raw object and report missing fields — but only once per run.
+    if (-not $script:NullDebugWritten) {
+        $nullFields = $flat.PSObject.Properties |
+            Where-Object { $null -eq $_.Value -or "$($_.Value)" -eq "" } |
+            Select-Object -ExpandProperty Name
+        if ($nullFields) {
+            $script:NullDebugWritten = $true
+            $debugPayload = [PSCustomObject]@{
+                _info       = "One or more mapped fields were null/empty. Raw API object included for inspection."
+                _nullFields = $nullFields
+                _rawObject  = $D
+            }
+            $debugPath = Join-Path $script:cfg_OutputPath "ESET_NullFields_Debug_$(Get-Date -Format 'yyyyMMdd_HHmmss').json"
+            try {
+                $debugPayload | ConvertTo-Json -Depth 10 |
+                    Out-File -FilePath $debugPath -Encoding UTF8
+                Write-Log "Null fields detected — raw debug object saved to: $debugPath" "WARN"
+                Write-Log "  Null fields: $($nullFields -join ', ')" "WARN"
+            } catch {
+                Write-Log "Could not write null-field debug file: $_" "WARN"
+            }
+        }
+    }
+
+    return $flat
 }
 
 #endregion
@@ -1042,14 +1123,6 @@ try {
         }
         $allDetections.AddRange([object[]]$valueProp.Value)
 
-        # DEBUG — log the raw property names and values of the first item on the first page
-        if ($page -eq 0 -and $allDetections.Count -gt 0) {
-            Write-Log "DEBUG: Raw property names on first list-detection object:" "DEBUG"
-            $allDetections[0].PSObject.Properties | ForEach-Object {
-                Write-Log ("DEBUG:   [$($_.Name)] = $($_.Value)") "DEBUG"
-            }
-        }
-
         Write-Progress -Id 1 -Activity "Fetching detection list" `
             -Status "$($page+1) of $pageCount pages  |  $($allDetections.Count) collected" `
             -PercentComplete ([int](($page+1)/$pageCount*100))
@@ -1075,13 +1148,6 @@ try {
                 -PercentComplete ([int]($fetched/$allDetections.Count*100))
             try {
                 $detail = Invoke-ApiCall -Uri "$baseUrl/api/v1/detections/$detId" -Headers $authHeaders
-                # DEBUG — log raw property names on the first detail response
-                if ($fetched -eq 1) {
-                    Write-Log "DEBUG: Raw property names on first detail-detection object:" "DEBUG"
-                    $detail.PSObject.Properties | ForEach-Object {
-                        Write-Log ("DEBUG:   [$($_.Name)] = $($_.Value)") "DEBUG"
-                    }
-                }
                 $enriched.Add((ConvertTo-FlatDetection $detail))
             } catch {
                 $detailErrors++
