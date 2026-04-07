@@ -597,21 +597,139 @@
     color: var(--muted);
     font-size: 13px;
   }
+
+  /* ---- REVIEWED STATE ---- */
+  .sidebar-item.reviewed-item { opacity: 0.45; }
+  .sidebar-item.reviewed-item .item-name { text-decoration: line-through; }
+
+  .badge-reviewed { background: rgba(34,197,94,0.15); color: var(--green); }
+
+  .review-card {
+    background: rgba(34,197,94,0.08);
+    border: 1px solid rgba(34,197,94,0.25);
+    border-left: 3px solid var(--green);
+    border-radius: 0 10px 10px 0;
+    padding: 12px 16px;
+    margin-bottom: 24px;
+    font-size: 13px;
+    line-height: 1.6;
+  }
+  .review-card .review-by   { font-weight: 700; color: var(--green); }
+  .review-card .review-time { color: var(--muted); font-family: 'JetBrains Mono', monospace; font-size: 11px; }
+  .review-card .review-note { margin-top: 6px; color: var(--text); white-space: pre-wrap; }
+
+  .mark-reviewed-btn {
+    padding: 9px 18px;
+    border-radius: 8px;
+    border: 1px solid var(--green);
+    background: rgba(34,197,94,0.1);
+    color: var(--green);
+    font-family: 'Syne', sans-serif;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .mark-reviewed-btn:hover     { background: var(--green); color: #000; }
+  .mark-reviewed-btn.done      { background: var(--green); color: #000; border-color: var(--green); }
+
+  .unmark-btn {
+    padding: 5px 10px;
+    border-radius: 6px;
+    border: 1px solid rgba(239,68,68,0.4);
+    background: transparent;
+    color: var(--red);
+    font-family: 'Syne', sans-serif;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .unmark-btn:hover { background: rgba(239,68,68,0.15); }
+
+  /* ---- NAME PROMPT OVERLAY ---- */
+  .name-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.75);
+    backdrop-filter: blur(6px);
+    z-index: 200;
+    align-items: center;
+    justify-content: center;
+  }
+  .name-overlay.open { display: flex; }
+
+  .name-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 32px;
+    width: 90%;
+    max-width: 420px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .name-card h2 { font-size: 20px; font-weight: 800; }
+  .name-card p  { font-size: 13px; color: var(--muted); line-height: 1.5; }
+
+  .name-input {
+    width: 100%;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 14px;
+    color: var(--text);
+    font-family: 'Syne', sans-serif;
+    font-size: 15px;
+    font-weight: 600;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+  .name-input:focus { border-color: var(--accent); }
+
+  .stat-chip.reviewed { background: rgba(34,197,94,0.12); border-color: rgba(34,197,94,0.3); color: var(--green); }
 </style>
 </head>
 <body>
+
+<!-- NAME PROMPT OVERLAY -->
+<div class="name-overlay open" id="nameOverlay">
+  <div class="name-card">
+    <h2>&#128100; Who is reviewing?</h2>
+    <p>Your name will be recorded with each exclusion you mark as reviewed, and saved in the review state file.</p>
+    <input class="name-input" id="reviewerNameInput" type="text" placeholder="Your name..." maxlength="80"
+           onkeydown="if(event.key==='Enter') confirmReviewerName()">
+    <button class="btn btn-accent" onclick="confirmReviewerName()">Start Review &rarr;</button>
+  </div>
+</div>
 
 <!-- DROP ZONE -->
 <div id="dropzone">
   <div class="drop-logo">ESET Inspect</div>
   <h1 class="drop-title">Exclusion<br>Reviewer</h1>
-  <p class="drop-sub">Load your exported JSON file to review exclusions one by one with full XML criteria visibility.</p>
+  <p class="drop-sub">Load your exported JSON file to review exclusions. Optionally load a previous review state file to skip already-reviewed items.</p>
   <div class="drop-box" id="dropBox" onclick="document.getElementById('fileInput').click()">
     <div class="drop-icon">&#128196;</div>
     <div class="drop-label">Drop JSON export here</div>
     <div class="drop-hint">or click to browse &mdash; exported by Export-EsetInspectExclusions.ps1</div>
   </div>
   <input type="file" id="fileInput" accept=".json">
+  <div style="display:flex;align-items:center;gap:12px;margin-top:8px">
+    <div style="flex:1;height:1px;background:var(--border)"></div>
+    <span style="font-size:12px;color:var(--muted)">optionally load previous review state</span>
+    <div style="flex:1;height:1px;background:var(--border)"></div>
+  </div>
+  <div class="drop-box" id="stateDropBox" onclick="document.getElementById('stateFileInput').click()" style="padding:20px 40px">
+    <div class="drop-icon" style="width:36px;height:36px;border-radius:10px;font-size:16px">&#128204;</div>
+    <div class="drop-label" style="font-size:13px">Load review state file</div>
+    <div class="drop-hint" id="stateFileHint">No state file loaded &mdash; load multiple files to merge reviews from different team members</div>
+  </div>
+  <input type="file" id="stateFileInput" accept=".json">
 </div>
 
 <!-- APP -->
@@ -623,6 +741,7 @@
     <div class="topbar-spacer"></div>
     <div class="topbar-actions">
       <button class="btn" onclick="openFlagModal()" id="exportFlagBtn">&#9873; Export Flagged</button>
+      <button class="btn btn-accent" onclick="saveStateFile()">&#128190; Save Review State</button>
       <button class="btn" onclick="resetApp()">&#8617; Load New File</button>
     </div>
   </div>
@@ -634,11 +753,13 @@
       <input class="search-input" type="text" id="searchInput" placeholder="Search by name, note, rule ID..." oninput="applyFilters()">
     </div>
     <span class="filter-label">Show:</span>
-    <button class="filter-btn active" id="filterAll"      onclick="setFilter('all')">All</button>
-    <button class="filter-btn"        id="filterEnabled"  onclick="setFilter('enabled')">Enabled</button>
-    <button class="filter-btn"        id="filterDisabled" onclick="setFilter('disabled')">Disabled</button>
-    <button class="filter-btn"        id="filterFlagged"  onclick="setFilter('flagged')">Flagged</button>
-    <button class="filter-btn"        id="filterNoRules"  onclick="setFilter('norules')">No Rules</button>
+    <button class="filter-btn active" id="filterAll"        onclick="setFilter('all')">All</button>
+    <button class="filter-btn"        id="filterPending"    onclick="setFilter('pending')">Pending</button>
+    <button class="filter-btn"        id="filterReviewed"   onclick="setFilter('reviewed')">Reviewed</button>
+    <button class="filter-btn"        id="filterEnabled"    onclick="setFilter('enabled')">Enabled</button>
+    <button class="filter-btn"        id="filterDisabled"   onclick="setFilter('disabled')">Disabled</button>
+    <button class="filter-btn"        id="filterFlagged"    onclick="setFilter('flagged')">Flagged</button>
+    <button class="filter-btn"        id="filterNoRules"    onclick="setFilter('norules')">No Rules</button>
   </div>
 
   <!-- Main -->
@@ -669,18 +790,40 @@
 </div>
 
 <script>
+// ============================================================
+// STATE
+// ============================================================
 let allData       = [];
 let filteredData  = [];
 let flagged       = new Set();
+let reviewed      = {};   // { id: { reviewerName, timestamp, note } }
 let currentFilter = 'all';
 let currentIndex  = 0;
+let reviewerName  = '';
+let stateLoaded   = false;
 
-// ---- FILE LOADING ----------------------------------------------------------
+// ============================================================
+// REVIEWER NAME PROMPT
+// ============================================================
+function confirmReviewerName() {
+  const val = document.getElementById('reviewerNameInput').value.trim();
+  if (!val) {
+    document.getElementById('reviewerNameInput').style.borderColor = 'var(--red)';
+    return;
+  }
+  reviewerName = val;
+  document.getElementById('nameOverlay').classList.remove('open');
+}
 
-const dropzone  = document.getElementById('dropzone');
-const app       = document.getElementById('app');
-const fileInput = document.getElementById('fileInput');
-const dropBox   = document.getElementById('dropBox');
+// ============================================================
+// FILE LOADING
+// ============================================================
+const dropzone      = document.getElementById('dropzone');
+const app           = document.getElementById('app');
+const fileInput     = document.getElementById('fileInput');
+const dropBox       = document.getElementById('dropBox');
+const stateDropBox  = document.getElementById('stateDropBox');
+const stateFileInput= document.getElementById('stateFileInput');
 
 dropBox.addEventListener('dragover', e => { e.preventDefault(); dropzone.classList.add('drag-over'); dropBox.classList.add('active'); });
 dropBox.addEventListener('dragleave', () => { dropzone.classList.remove('drag-over'); dropBox.classList.remove('active'); });
@@ -691,15 +834,14 @@ dropBox.addEventListener('drop', e => {
   const file = e.dataTransfer.files[0];
   if (file) loadFile(file);
 });
-
 fileInput.addEventListener('change', e => { if (e.target.files[0]) loadFile(e.target.files[0]); });
+stateFileInput.addEventListener('change', e => { if (e.target.files[0]) loadStateFile(e.target.files[0]); });
 
 function loadFile(file) {
   const reader = new FileReader();
   reader.onload = e => {
     try {
       let parsed = JSON.parse(e.target.result);
-      // Handle both raw array and wrapped object
       if (Array.isArray(parsed)) {
         allData = parsed;
       } else if (parsed.value && Array.isArray(parsed.value)) {
@@ -707,19 +849,53 @@ function loadFile(file) {
       } else {
         allData = [parsed];
       }
-      // Normalise boolean fields that may come as strings
       allData = allData.map(d => ({
         ...d,
         enabled:    d.enabled === true || d.enabled === 'True' || d.enabled === 'true',
         isDisabled: d.isDisabled === true || d.isDisabled === 'True' || d.isDisabled === 'true'
             || !(d.enabled === true || d.enabled === 'True' || d.enabled === 'true'),
         hasXml:     !!(d.xmlBody && d.xmlBody.trim() !== ''),
-        linkedRules: !!(d.ruleIds && d.ruleIds.toString().trim() !== ''),
-        ruleCount:  d.ruleCount || (d.ruleIds ? d.ruleIds.toString().split(',').filter(x => x.trim()).length : 0),
+        linkedRules: !!(d.rulesCount > 0 || (d.ruleIds && d.ruleIds.toString().trim() !== '')),
+        ruleCount:  d.rulesCount || d.ruleCount || 0,
       }));
       initApp();
     } catch(err) {
-      alert('Failed to parse JSON file:\n' + err.message);
+      alert('Failed to parse JSON file: ' + err.message);
+    }
+  };
+  reader.readAsText(file);
+}
+
+function loadStateFile(file) {
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const parsed = JSON.parse(e.target.result);
+      // State file format: { reviewed: { "id": { reviewerName, timestamp, note } } }
+      if (parsed.reviewed && typeof parsed.reviewed === 'object') {
+        // MERGE into current reviewed state -- never replace.
+        // This means multiple state files from different reviewers can be
+        // loaded one after another and all entries are preserved.
+        // If the same exclusion was reviewed by two people, the EARLIER
+        // review is kept (first reviewer wins).
+        let added = 0, skipped = 0;
+        Object.entries(parsed.reviewed).forEach(([id, entry]) => {
+          if (!reviewed[id]) { reviewed[id] = entry; added++; }
+          else skipped++;
+        });
+        stateLoaded = true;
+        const total = Object.keys(reviewed).length;
+        document.getElementById('stateFileHint').textContent =
+          `State merged: ${total} reviewed total (${added} added, ${skipped} already known)`;
+        document.getElementById('stateDropBox').style.borderColor = 'var(--green)';
+        document.getElementById('stateDropBox').style.borderStyle = 'solid';
+        // If app already open, refresh
+        if (app.style.display !== 'none') { updateStats(); applyFilters(); }
+      } else {
+        alert('Not a valid review state file. Expected { "reviewed": { ... } }');
+      }
+    } catch(err) {
+      alert('Failed to parse state file: ' + err.message);
     }
   };
   reader.readAsText(file);
@@ -738,24 +914,28 @@ function initApp() {
 
 function resetApp() {
   allData = []; filteredData = []; flagged.clear();
+  // Keep reviewed state and reviewer name across sessions
   app.style.display = 'none';
   dropzone.style.display = 'flex';
   fileInput.value = '';
+  stateFileInput.value = '';
 }
 
-// ---- FILTERING -------------------------------------------------------------
-
+// ============================================================
+// FILTERING
+// ============================================================
 function setFilter(f) {
   currentFilter = f;
-  ['all','enabled','disabled','flagged','norules'].forEach(k => {
-    const btn = document.getElementById('filter' + k.charAt(0).toUpperCase() + k.slice(1));
-    if (btn) {
-      btn.classList.remove('active','active-red','active-yellow');
-      if (k === f) {
-        if (k === 'disabled') btn.classList.add('active-red');
-        else if (k === 'flagged') btn.classList.add('active-yellow');
-        else btn.classList.add('active');
-      }
+  ['all','pending','reviewed','enabled','disabled','flagged','norules'].forEach(k => {
+    const id  = 'filter' + k.charAt(0).toUpperCase() + k.slice(1);
+    const btn = document.getElementById(id);
+    if (!btn) return;
+    btn.classList.remove('active','active-red','active-yellow','active-green');
+    if (k === f) {
+      if (k === 'disabled')  btn.classList.add('active-red');
+      else if (k === 'flagged') btn.classList.add('active-yellow');
+      else if (k === 'reviewed') btn.classList.add('active-green');
+      else btn.classList.add('active');
     }
   });
   applyFilters();
@@ -764,12 +944,16 @@ function setFilter(f) {
 function applyFilters() {
   const q = document.getElementById('searchInput').value.toLowerCase().trim();
   filteredData = allData.filter(d => {
-    if (currentFilter === 'enabled'  && d.isDisabled)      return false;
-    if (currentFilter === 'disabled' && !d.isDisabled)     return false;
-    if (currentFilter === 'flagged'  && !flagged.has(String(d.id))) return false;
-    if (currentFilter === 'norules'  && d.linkedRules)      return false;
+    const isRev = !!reviewed[String(d.id)];
+    if (currentFilter === 'pending'   && isRev)                           return false;
+    if (currentFilter === 'reviewed'  && !isRev)                          return false;
+    if (currentFilter === 'enabled'   && d.isDisabled)                    return false;
+    if (currentFilter === 'disabled'  && !d.isDisabled)                   return false;
+    if (currentFilter === 'flagged'   && !flagged.has(String(d.id)))      return false;
+    if (currentFilter === 'norules'   && d.linkedRules)                   return false;
     if (q) {
-      const haystack = [d.name, d.note, d.ruleIds, d.ruleUuids, d.uuid, d.xmlBody]
+      const haystack = [d.name, d.note, d.ruleIds, d.ruleUuids, d.uuid,
+                        d.xmlBody, d.author, d.targets, d.ruleName]
         .filter(Boolean).join(' ').toLowerCase();
       if (!haystack.includes(q)) return false;
     }
@@ -786,8 +970,9 @@ function applyFilters() {
     </div>`;
 }
 
-// ---- SIDEBAR ---------------------------------------------------------------
-
+// ============================================================
+// SIDEBAR
+// ============================================================
 function renderSidebar() {
   const list = document.getElementById('sidebarList');
   if (filteredData.length === 0) {
@@ -796,18 +981,20 @@ function renderSidebar() {
   }
   list.innerHTML = filteredData.map((d, i) => {
     const isFlagged  = flagged.has(String(d.id));
+    const isRev      = !!reviewed[String(d.id)];
     const statusBadge = d.isDisabled
       ? '<span class="badge badge-disabled">DISABLED</span>'
       : '<span class="badge badge-enabled">ENABLED</span>';
-    const ruleBadge = d.linkedRules
+    const ruleBadge  = d.linkedRules
       ? `<span class="badge badge-rules">${d.ruleCount} rule${d.ruleCount !== 1 ? 's' : ''}</span>`
       : '';
     const flagBadge  = isFlagged ? '<span class="badge badge-flag">&#9873;</span>' : '';
+    const revBadge   = isRev ? '<span class="badge badge-reviewed">&#10003;</span>' : '';
     const xmlBadge   = !d.hasXml ? '<span class="badge badge-noxml">no XML</span>' : '';
-    return `<li class="sidebar-item${i === currentIndex ? ' active' : ''}${isFlagged ? ' flagged-item' : ''}"
+    return `<li class="sidebar-item${i === currentIndex ? ' active' : ''}${isFlagged ? ' flagged-item' : ''}${isRev ? ' reviewed-item' : ''}"
                onclick="selectItem(${i})">
       <div class="item-name" title="${esc(d.name || '(unnamed)')}">${esc(d.name || '(unnamed)')}</div>
-      <div class="item-meta">${statusBadge}${ruleBadge}${flagBadge}${xmlBadge}</div>
+      <div class="item-meta">${statusBadge}${ruleBadge}${revBadge}${flagBadge}${xmlBadge}</div>
     </li>`;
   }).join('');
 }
@@ -816,31 +1003,52 @@ function selectItem(i) {
   currentIndex = i;
   renderSidebar();
   renderDetail(i);
-  // Scroll selected item into view
   const items = document.querySelectorAll('.sidebar-item');
   if (items[i]) items[i].scrollIntoView({ block: 'nearest' });
 }
 
-// ---- DETAIL PANEL ----------------------------------------------------------
-
+// ============================================================
+// DETAIL PANEL
+// ============================================================
 function renderDetail(i) {
   const d = filteredData[i];
   if (!d) return;
 
   const isFlagged = flagged.has(String(d.id));
+  const revEntry  = reviewed[String(d.id)];
+  const isRev     = !!revEntry;
+
   const statusBadge = d.isDisabled
     ? '<span class="badge badge-disabled" style="font-size:13px;padding:4px 10px">DISABLED</span>'
     : '<span class="badge badge-enabled"  style="font-size:13px;padding:4px 10px">ENABLED</span>';
 
-  // Build rules section
+  // Reviewed status block
+  const reviewedHtml = isRev
+    ? `<div class="review-card">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+          <div>
+            <span class="review-by">&#10003; Reviewed by ${esc(revEntry.reviewerName)}</span>
+            &nbsp;&nbsp;
+            <span class="review-time">${esc(new Date(revEntry.timestamp).toLocaleString())}</span>
+          </div>
+          <button class="unmark-btn" onclick="unmarkReviewed('${d.id}')">&#8617; Mark as Pending</button>
+        </div>
+        ${revEntry.note ? `<div class="review-note">${esc(revEntry.note)}</div>` : ''}
+      </div>`
+    : '';
+
+  // Rules section
   const ruleIdsArr   = d.ruleIds   ? d.ruleIds.toString().split(',').map(x => x.trim()).filter(Boolean) : [];
   const ruleUuidsArr = d.ruleUuids ? d.ruleUuids.toString().split(',').map(x => x.trim()).filter(Boolean) : [];
+  const ruleNamesArr = d.ruleName  ? d.ruleName.toString().split(';').map(x => x.trim()).filter(Boolean) : [];
   const rulesHtml = ruleIdsArr.length > 0
     ? ruleIdsArr.map((id, idx) => {
-        const uuid = ruleUuidsArr[idx] ? ` &mdash; <span style="opacity:0.6">${esc(ruleUuidsArr[idx])}</span>` : '';
-        return `<div class="rule-chip">Rule ID: ${esc(id)}${uuid}</div>`;
+        const name = ruleNamesArr[idx] ? `<div style="font-size:11px;color:var(--muted);margin-top:2px">${esc(ruleNamesArr[idx])}</div>` : '';
+        return `<div class="rule-chip" style="display:flex;flex-direction:column">Rule ID: ${esc(id)}${name}</div>`;
       }).join('')
-    : '<span style="color:var(--muted);font-size:13px;font-style:italic">Not linked to any rule (global exclusion)</span>';
+    : (d.rulesCount > 0
+        ? `<span class="rule-chip">${d.rulesCount} rule${d.rulesCount!==1?'s':''} (IDs not available in this export)</span>`
+        : '<span style="color:var(--muted);font-size:13px;font-style:italic">Not linked to any rule (global exclusion)</span>');
 
   // XML
   const xmlHtml = d.hasXml
@@ -853,7 +1061,7 @@ function renderDetail(i) {
        </div>`
     : `<div class="xml-wrap">
         <div class="xml-toolbar"><span class="xml-toolbar-label">XML Criteria Body</span></div>
-        <div class="xml-empty">No XML body &mdash; this exclusion has no criteria or was exported without -FetchDetails</div>
+        <div class="xml-empty">No XML body &mdash; this is a standard criteria exclusion or was exported without -FetchDetails</div>
        </div>`;
 
   document.getElementById('detailPanel').innerHTML = `
@@ -862,10 +1070,15 @@ function renderDetail(i) {
       <span class="nav-counter">${i + 1} / ${filteredData.length}</span>
       <button class="nav-btn" onclick="navigate(1)" ${i === filteredData.length - 1 ? 'disabled' : ''}>Next &rarr;</button>
       <div style="flex:1"></div>
+      <button class="mark-reviewed-btn${isRev ? ' done' : ''}" onclick="markReviewed('${d.id}')">
+        ${isRev ? '&#10003; Reviewed' : '&#10003; Mark as Reviewed'}
+      </button>
       <button class="flag-btn${isFlagged ? ' flagged' : ''}" onclick="toggleFlag('${d.id}')">
-        &#9873; ${isFlagged ? 'Unflag' : 'Flag for review'}
+        &#9873; ${isFlagged ? 'Unflag' : 'Flag'}
       </button>
     </div>
+
+    ${reviewedHtml}
 
     <div class="detail-header">
       <div class="detail-title">${esc(d.name || '(unnamed)')}</div>
@@ -875,28 +1088,65 @@ function renderDetail(i) {
     <div class="fields-grid">
       <div class="field-card">
         <div class="field-label">ID</div>
-        <div class="field-value">${esc(d.id ?? '')}</div>
+        <div class="field-value">${esc(String(d.id ?? ''))}</div>
       </div>
       <div class="field-card">
-        <div class="field-label">UUID</div>
-        <div class="field-value" style="font-size:11px">${esc(d.uuid ?? '')}</div>
-      </div>
-      <div class="field-card">
-        <div class="field-label">Has XML Criteria</div>
-        <div class="field-value" style="color:${d.hasXml ? 'var(--green)' : 'var(--muted)'}">${d.hasXml ? 'Yes' : 'No'}</div>
-      </div>
-      <div class="field-card">
-        <div class="field-label">Author / Created By</div>
+        <div class="field-label">Author</div>
         <div class="field-value ${d.author && d.author.trim() ? '' : 'empty'}">${d.author && d.author.trim() ? esc(d.author) : 'n/a'}</div>
+      </div>
+      <div class="field-card">
+        <div class="field-label">Created</div>
+        <div class="field-value ${d.timestamp ? '' : 'empty'}">${d.timestamp ? esc(new Date(d.timestamp).toLocaleString()) : 'n/a'}</div>
+      </div>
+      <div class="field-card">
+        <div class="field-label">Access Group</div>
+        <div class="field-value ${d.accessGroup ? '' : 'empty'}">${d.accessGroup ? esc(d.accessGroup) : 'n/a'}</div>
+      </div>
+      <div class="field-card">
+        <div class="field-label">Type</div>
+        <div class="field-value" style="color:${d.isAdvanced ? 'var(--accent2)' : 'var(--accent)'}">${d.isAdvanced ? 'Advanced (XML Query)' : 'Standard (Criteria)'}</div>
+      </div>
+      <div class="field-card">
+        <div class="field-label">Internal (ESET)</div>
+        <div class="field-value" style="color:${d.isInternal ? 'var(--yellow)' : 'var(--green)'}">${d.isInternal ? 'Yes' : 'No'}</div>
+      </div>
+      <div class="field-card">
+        <div class="field-label">Hit Count</div>
+        <div class="field-value ${d.hitCount ? '' : 'empty'}">${d.hitCount ?? 0}</div>
       </div>
       <div class="field-card">
         <div class="field-label">Linked Rules</div>
         <div class="field-value" style="color:${d.linkedRules ? 'var(--accent)' : 'var(--muted)'}">${d.ruleCount || 0} rule${d.ruleCount !== 1 ? 's' : ''}</div>
       </div>
+      <div class="field-card">
+        <div class="field-label">Has XML Body</div>
+        <div class="field-value" style="color:${d.hasXml ? 'var(--green)' : 'var(--muted)'}">${d.hasXml ? 'Yes' : 'No'}</div>
+      </div>
+      <div class="field-card">
+        <div class="field-label">UUID</div>
+        <div class="field-value" style="font-size:11px">${esc(d.uuid ?? '')}</div>
+      </div>
     </div>
 
     <div class="section-label">Note</div>
     <div class="note-block${!d.note || d.note.trim() === '' ? ' empty' : ''}">${d.note && d.note.trim() !== '' ? esc(d.note) : 'No note set'}</div>
+
+    <div class="section-label">Targets</div>
+    <div class="note-block${!d.targets || d.targets.trim() === '' || d.targets === 'All' ? ' empty' : ''}" style="margin-bottom:24px">
+      ${d.targets && d.targets.trim() && d.targets !== 'All'
+        ? esc(d.targets).replace(/,\s*/g, '<br>')
+        : (d.targets === 'All' ? 'All computers' : 'No specific targets defined')}
+    </div>
+
+    <div class="section-label">Criteria Summary</div>
+    <div class="fields-grid" style="margin-bottom:24px">
+      ${[['Files', d.criteriaFiles], ['Paths', d.criteriaPaths], ['CMD Lines', d.criteriaCmdLine],
+         ['Signers', d.criteriaSigners], ['Hashes', d.criteriaHashes], ['Users', d.criteriaUsers]]
+        .map(([l,v]) => `<div class="field-card">
+          <div class="field-label">${l}</div>
+          <div class="field-value ${v ? '' : 'empty'}">${v || 0}</div>
+        </div>`).join('')}
+    </div>
 
     <div class="section-label">Linked Rules</div>
     <div class="rules-block">${rulesHtml}</div>
@@ -905,13 +1155,92 @@ function renderDetail(i) {
   `;
 }
 
-function navigate(dir) {
-  const next = currentIndex + dir;
-  if (next >= 0 && next < filteredData.length) selectItem(next);
+// ============================================================
+// REVIEW STATE
+// ============================================================
+function markReviewed(id) {
+  id = String(id);
+  if (reviewed[id]) { unmarkReviewed(id); return; }
+
+  // Optionally prompt for a review note
+  const note = prompt('Optional: add a review note (press Cancel or leave blank to skip)', '') ;
+  // null = cancelled prompt = still mark as reviewed, just no note
+
+  reviewed[id] = {
+    reviewerName: reviewerName || 'Unknown',
+    timestamp:    new Date().toISOString(),
+    note:         (note || '').trim(),
+    exclusionId:  id,
+  };
+  updateStats();
+  renderSidebar();
+  renderDetail(currentIndex);
+  // Auto-advance to next unreviewed item if there is one
+  const next = filteredData.slice(currentIndex + 1).findIndex(x => !reviewed[String(x.id)]);
+  if (next !== -1) selectItem(currentIndex + 1 + next);
 }
 
-// ---- FLAG / EXPORT ---------------------------------------------------------
+function unmarkReviewed(id) {
+  id = String(id);
+  delete reviewed[id];
+  updateStats();
+  renderSidebar();
+  renderDetail(currentIndex);
+}
 
+function saveStateFile() {
+  const revCount = Object.keys(reviewed).length;
+  if (revCount === 0) {
+    alert('No exclusions have been marked as reviewed yet.');
+    return;
+  }
+
+  // Build a summary of who has reviewed what, for the audit header
+  const byReviewer = {};
+  Object.values(reviewed).forEach(e => {
+    const name = e.reviewerName || 'Unknown';
+    byReviewer[name] = (byReviewer[name] || 0) + 1;
+  });
+
+  const state = {
+    _info:          'ESET Inspect Exclusion Review State File -- save this back to the shared file share to keep everyone in sync',
+    _savedAt:       new Date().toISOString(),
+    _savedBy:       reviewerName || 'Unknown',
+    _totalReviewed: revCount,
+    _reviewerSummary: byReviewer,
+    _usage:         'Load this file alongside a new exclusion export to skip already-reviewed items. Multiple state files can be loaded one after another -- they are merged.',
+    reviewed,
+  };
+
+  const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
+  const a    = document.createElement('a');
+  a.href     = URL.createObjectURL(blob);
+  // Fixed filename so reviewers always overwrite the same file on the share
+  a.download = 'ESET_ExclusionReviewState.json';
+  a.click();
+}
+
+// ============================================================
+// STATS
+// ============================================================
+function updateStats() {
+  const total    = allData.length;
+  const enabled  = allData.filter(d => !d.isDisabled).length;
+  const disabled = allData.filter(d =>  d.isDisabled).length;
+  const nRev     = Object.keys(reviewed).filter(id => allData.some(d => String(d.id) === id)).length;
+  const pending  = total - nRev;
+  const nFlagged = flagged.size;
+  document.getElementById('topbarStats').innerHTML = `
+    <span class="stat-chip total">Total: ${total}</span>
+    <span class="stat-chip enabled">Enabled: ${enabled}</span>
+    <span class="stat-chip disabled">Disabled: ${disabled}</span>
+    <span class="stat-chip reviewed">Reviewed: ${nRev}</span>
+    <span class="stat-chip flagged">Pending: ${pending} &nbsp;|&nbsp; Flagged: ${nFlagged}</span>`;
+}
+
+// ============================================================
+// FLAG / EXPORT
+// ============================================================
 function toggleFlag(id) {
   id = String(id);
   if (flagged.has(id)) flagged.delete(id);
@@ -921,33 +1250,20 @@ function toggleFlag(id) {
   renderDetail(currentIndex);
 }
 
-function updateStats() {
-  const total    = allData.length;
-  const enabled  = allData.filter(d => !d.isDisabled).length;
-  const disabled = allData.filter(d =>  d.isDisabled).length;
-  const nFlagged = flagged.size;
-  document.getElementById('topbarStats').innerHTML = `
-    <span class="stat-chip total">Total: ${total}</span>
-    <span class="stat-chip enabled">Enabled: ${enabled}</span>
-    <span class="stat-chip disabled">Disabled: ${disabled}</span>
-    <span class="stat-chip flagged">Flagged: ${nFlagged}</span>
-  `;
-}
-
 function openFlagModal() {
   const flaggedItems = allData.filter(d => flagged.has(String(d.id)));
   const sub = document.getElementById('flagModalSub');
   const list = document.getElementById('flagList');
 
   if (flaggedItems.length === 0) {
-    sub.textContent  = 'No exclusions have been flagged yet. Use the "Flag for review" button on each exclusion.';
+    sub.textContent  = 'No exclusions have been flagged yet.';
     list.innerHTML   = '';
   } else {
-    sub.textContent = `${flaggedItems.length} exclusion${flaggedItems.length !== 1 ? 's' : ''} flagged for review.`;
+    sub.textContent = `${flaggedItems.length} exclusion(s) flagged for attention.`;
     list.innerHTML  = flaggedItems.map(d => `
       <li class="modal-item">
         <div>${esc(d.name || '(unnamed)')}</div>
-        <div class="modal-item-id">ID: ${esc(d.id ?? '')} &nbsp;|&nbsp; ${d.isDisabled ? 'DISABLED' : 'ENABLED'}</div>
+        <div class="modal-item-id">ID: ${esc(String(d.id ?? ''))} &nbsp;|&nbsp; ${d.isDisabled ? 'DISABLED' : 'ENABLED'}</div>
       </li>`).join('');
   }
   document.getElementById('flagModal').classList.add('open');
@@ -968,8 +1284,9 @@ function downloadFlagged() {
   closeFlagModal();
 }
 
-// ---- XML COPY --------------------------------------------------------------
-
+// ============================================================
+// XML / UTILS
+// ============================================================
 function copyXml() {
   const d = filteredData[currentIndex];
   if (!d || !d.xmlBody) return;
@@ -979,48 +1296,38 @@ function copyXml() {
   });
 }
 
-// ---- XML SYNTAX HIGHLIGHT --------------------------------------------------
-
 function highlightXml(xml) {
   if (!xml) return '';
-  // Escape HTML first
   let s = xml.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-  // Comments
   s = s.replace(/(&lt;!--[\s\S]*?--&gt;)/g, '<span class="xml-comment">$1</span>');
-  // Tags with attributes
   s = s.replace(/(&lt;\/?)([\w:\-\.]+)((?:\s+[\w:\-\.]+\s*=\s*&quot;[^&]*&quot;)*)\s*(\/?&gt;)/g,
     (_, open, tag, attrs, close) => {
       const attrsHtml = attrs.replace(/([\w:\-\.]+)\s*=\s*(&quot;[^&]*&quot;)/g,
         '<span class="xml-attr">$1</span>=<span class="xml-val">$2</span>');
       return `${open}<span class="xml-tag">${tag}</span>${attrsHtml}${close}`;
     });
-  // Self-closing tags without attributes
   s = s.replace(/(&lt;\/?)([\w:\-\.]+)(\s*\/?&gt;)/g,
     (m, open, tag, close) => `${open}<span class="xml-tag">${tag}</span>${close}`);
   return s;
 }
 
-// ---- UTILS -----------------------------------------------------------------
-
 function esc(s) {
-  return String(s ?? '')
-    .replace(/&/g,'&amp;')
-    .replace(/</g,'&lt;')
-    .replace(/>/g,'&gt;')
-    .replace(/"/g,'&quot;');
+  return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-// Keyboard navigation
+function navigate(dir) {
+  const next = currentIndex + dir;
+  if (next >= 0 && next < filteredData.length) selectItem(next);
+}
+
 document.addEventListener('keydown', e => {
   if (app.style.display === 'none') return;
   if (document.getElementById('flagModal').classList.contains('open')) return;
   if (e.target.tagName === 'INPUT') return;
   if (e.key === 'ArrowRight' || e.key === 'ArrowDown') { e.preventDefault(); navigate(1); }
   if (e.key === 'ArrowLeft'  || e.key === 'ArrowUp')   { e.preventDefault(); navigate(-1); }
-  if (e.key === 'f' || e.key === 'F') {
-    const d = filteredData[currentIndex];
-    if (d) toggleFlag(d.id);
-  }
+  if (e.key === 'f' || e.key === 'F') { const d = filteredData[currentIndex]; if (d) toggleFlag(String(d.id)); }
+  if (e.key === 'r' || e.key === 'R') { const d = filteredData[currentIndex]; if (d) markReviewed(String(d.id)); }
 });
 </script>
 </body>
