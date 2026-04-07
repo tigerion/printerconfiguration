@@ -291,7 +291,8 @@ function Invoke-ApiCall {
     while ($true) {
         $attempt++
         try {
-            return Invoke-RestMethod @(New-ApiSplat -Uri $Uri -Method $Method -Headers $Headers -Body $Body)
+            $splat = New-ApiSplat -Uri $Uri -Method $Method -Headers $Headers -Body $Body
+            return Invoke-RestMethod @splat
         } catch [System.Net.WebException] {
             $response = $_.Exception.Response
             $status   = if ($response) { [int]$response.StatusCode } else { 0 }
