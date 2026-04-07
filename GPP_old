@@ -1,0 +1,641 @@
+#Requires -Version 5.1
+<#
+.SYNOPSIS
+    Exports all exclusions from ESET Inspect On-Prem via REST API, including full XML criteria.
+
+.DESCRIPTION
+    Authenticates against the ESET Inspect On-Prem REST API, retrieves all exclusions with full
+    detail (including the XML body containing criteria/query) using paginated requests, and
+    exports results to CSV and/or JSON for review.
+
+    Two API calls are made per exclusion:
+        GET /api/v1/exclusions          -- paginated list (id, uuid, name, enabled, note)
+        GET /api/v1/exclusions/{id}     -- full detail including XML body, ruleIds, ruleUuids
+
+    Config file:
+        Reuses the same eset-config.json as Export-EsetInspectDetections.ps1 by default.
+        All connection and tuning settings are shared. Use -ConfigFile to point at a
+        different file if needed.
+
+.PARAMETER ConfigFile
+    Path to a JSON config file. Defaults to eset-config.json in the script directory.
+
+.PARAMETER Server
+    FQDN or IP of the ESET Inspect On-Prem server.
+
+.PARAMETER Username
+    Username for API authentication.
+
+.PARAMETER Password
+    Optional. Prompted securely if omitted.
+
+.PARAMETER Domain
+    Set to $true for domain accounts. Default: $false
+
+.PARAMETER OutputPath
+    Directory for output files. Created if it does not exist. Default: current directory.
+
+.PARAMETER ExportFormat
+    CSV, JSON, or Both. Default: Both
+
+.PARAMETER IncludeDisabled
+    When $true (default), exports all exclusions including disabled ones.
+    Set to $false to export only enabled exclusions.
+
+.PARAMETER FetchDetails
+    When $true (default), calls GET /exclusions/{id} per exclusion to get the XML body,
+    ruleIds, and ruleUuids. Set to $false for a faster export without XML criteria.
+
+.PARAMETER DetailDelayMs
+    Milliseconds between per-exclusion detail calls. Default: 50.
+
+.PARAMETER MaxRetries
+    Max retry attempts per API call. Default: 3.
+
+.PARAMETER SkipCertificateCheck
+    Ignore TLS/SSL certificate errors. Default: $true.
+
+.EXAMPLE
+    # Uses shared eset-config.json, prompts for password if not stored
+    .\Export-EsetInspectExclusions.ps1
+
+.EXAMPLE
+    # Override output path and format for this run only
+    .\Export-EsetInspectExclusions.ps1 -OutputPath "C:\Review" -ExportFormat JSON
+
+.EXAMPLE
+    # Enabled exclusions only, no XML detail (fast)
+    .\Export-EsetInspectExclusions.ps1 -IncludeDisabled $false -FetchDetails $false
+
+.NOTES
+    API reference : https://help.eset.com/ei_navigate/2.6/en-US/rest_api_exclusions.html
+    Config file   : shared with Export-EsetInspectDetections.ps1
+    Exit codes    : 0 = success, 1 = error
+#>
+
+[CmdletBinding(SupportsShouldProcess)]
+param(
+    [Parameter(Mandatory = $false)] [string]$ConfigFile  = "",
+    [Parameter(Mandatory = $false)] [string]$Server      = "",
+    [Parameter(Mandatory = $false)] [string]$Username    = "",
+    [Parameter(Mandatory = $false)] [string]$Password    = "",
+    [Parameter(Mandatory = $false)] [object]$Domain      = $null,
+    [Parameter(Mandatory = $false)] [string]$OutputPath  = "",
+    [Parameter(Mandatory = $false)]
+    [ValidateSet("CSV","JSON","Both","")]
+    [string]$ExportFormat = "",
+    [Parameter(Mandatory = $false)] [object]$IncludeDisabled      = $null,
+    [Parameter(Mandatory = $false)] [object]$FetchDetails          = $null,
+    [Parameter(Mandatory = $false)] [int]   $DetailDelayMs         = -1,
+    [Parameter(Mandatory = $false)] [int]   $MaxRetries            = -1,
+    [Parameter(Mandatory = $false)] [object]$SkipCertificateCheck  = $null
+)
+
+Set-StrictMode -Version Latest
+$ErrorActionPreference = "Stop"
+
+$script:RunStart         = Get-Date
+$script:AuthTime         = $null
+$script:ExitCode         = 0
+$script:RunLog           = [System.Collections.Generic.List[hashtable]]::new()
+$script:DefaultConfigPath = Join-Path $PSScriptRoot "eset-config.json"
+
+#region -- Logging ------------------------------------------------------------
+
+function Write-Log {
+    param(
+        [string]$Message,
+        [ValidateSet("INFO","OK","WARN","ERROR","DEBUG")]
+        [string]$Level = "INFO"
+    )
+    $ts    = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    $color = switch ($Level) {
+        "OK"    { "Green"    }
+        "WARN"  { "Yellow"   }
+        "ERROR" { "Red"      }
+        "DEBUG" { "DarkGray" }
+        default { "Cyan"     }
+    }
+    Write-Host "[$ts][$Level] $Message" -ForegroundColor $color
+    $script:RunLog.Add(@{ timestamp = $ts; level = $Level; message = $Message })
+}
+
+#endregion
+
+#region -- TLS / DPAPI --------------------------------------------------------
+
+function Import-DpapiAssembly {
+    try { Add-Type -AssemblyName System.Security -ErrorAction Stop }
+    catch { throw "Could not load System.Security assembly: $_" }
+}
+
+function Enable-TlsBypass {
+    if ($PSVersionTable.PSVersion.Major -lt 6) {
+        if (-not ([System.Management.Automation.PSTypeName]"EsetTrustAll2").Type) {
+            Add-Type -TypeDefinition @"
+using System.Net;
+using System.Security.Cryptography.X509Certificates;
+public class EsetTrustAll2 : ICertificatePolicy {
+    public bool CheckValidationResult(
+        ServicePoint sp, X509Certificate cert, WebRequest req, int problem) { return true; }
+}
+"@
+        }
+        [System.Net.ServicePointManager]::CertificatePolicy = New-Object EsetTrustAll2
+    }
+    $needed = [System.Net.SecurityProtocolType]::Tls12
+    if (-not ([System.Net.ServicePointManager]::SecurityProtocol -band $needed)) {
+        [System.Net.ServicePointManager]::SecurityProtocol =
+            [System.Net.ServicePointManager]::SecurityProtocol -bor $needed
+    }
+}
+
+#endregion
+
+#region -- Config -------------------------------------------------------------
+
+function Get-ConfigPath {
+    if ($ConfigFile -ne "") { return $ConfigFile }
+    return $script:DefaultConfigPath
+}
+
+function Get-Prop {
+    param([PSCustomObject]$Obj, [string]$Name, $Default = $null)
+    if ($null -eq $Obj) { return $Default }
+    $prop = $Obj.PSObject.Properties[$Name]
+    if ($null -eq $prop -or $null -eq $prop.Value) { return $Default }
+    return $prop.Value
+}
+
+function Read-Config {
+    $path = Get-ConfigPath
+    if (-not (Test-Path $path)) {
+        if ($ConfigFile -ne "") { Write-Log "Config file not found: $path" "WARN" }
+        return @{}
+    }
+    Write-Log "Loading config from: $path"
+    $raw = $null
+    try { $raw = Get-Content $path -Raw | ConvertFrom-Json }
+    catch { throw "Failed to parse config file '$path': $_" }
+
+    $cfg = @{}
+    foreach ($key in @("Server","Username","Domain","OutputPath","ExportFormat",
+                        "DetailDelayMs","MaxRetries","SkipCertificateCheck")) {
+        $prop = $raw.PSObject.Properties[$key]
+        if ($null -ne $prop -and $null -ne $prop.Value -and "$($prop.Value)" -ne "") {
+            $cfg[$key] = $prop.Value
+        }
+    }
+
+    $encProp = $raw.PSObject.Properties['EncryptedPassword']
+    if ($null -ne $encProp -and -not [string]::IsNullOrWhiteSpace($encProp.Value)) {
+        try {
+            if ($PSVersionTable.PSVersion.Major -ge 6 -and $PSVersionTable.Platform -ne "Win32NT") {
+                Write-Log "DPAPI not available on this OS -- password will be prompted." "WARN"
+            } else {
+                Import-DpapiAssembly
+                $bytes     = [Convert]::FromBase64String($encProp.Value)
+                $decrypted = [System.Security.Cryptography.ProtectedData]::Unprotect(
+                    $bytes, $null,
+                    [System.Security.Cryptography.DataProtectionScope]::CurrentUser)
+                $cfg["Password"] = [System.Text.Encoding]::UTF8.GetString($decrypted)
+                Write-Log "Encrypted password loaded from config." "OK"
+            }
+        } catch {
+            Write-Log "Failed to decrypt password from config: $_" "WARN"
+        }
+    }
+
+    Write-Log "Config loaded. Keys present: $($cfg.Keys -join ', ')" "OK"
+    return $cfg
+}
+
+function Merge-Config {
+    param([hashtable]$Cfg)
+    function Resolve-Str  { param($cli,$key,$def) if ($cli -ne "")   { $cli } elseif ($Cfg.ContainsKey($key) -and $Cfg[$key] -ne "") { $Cfg[$key] } else { $def } }
+    function Resolve-Int  { param($cli,$key,$def) if ($cli -ne -1)   { $cli } elseif ($Cfg.ContainsKey($key)) { [int]$Cfg[$key] } else { $def } }
+    function Resolve-Bool { param($cli,$key,$def) if ($null -ne $cli -and $cli -isnot [string]) { [bool]$cli } elseif ($Cfg.ContainsKey($key)) { [bool]$Cfg[$key] } else { $def } }
+
+    $script:cfg_Server               = Resolve-Str  $Server              "Server"               ""
+    $script:cfg_Username             = Resolve-Str  $Username            "Username"             ""
+    $script:cfg_Password             = Resolve-Str  $Password            "Password"             ""
+    $script:cfg_Domain               = Resolve-Bool $Domain              "Domain"               $false
+    $script:cfg_OutputPath           = Resolve-Str  $OutputPath          "OutputPath"           (Get-Location).Path
+    $script:cfg_ExportFormat         = Resolve-Str  $ExportFormat        "ExportFormat"         "Both"
+    $script:cfg_IncludeDisabled      = Resolve-Bool $IncludeDisabled     "IncludeDisabled"      $true
+    $script:cfg_FetchDetails         = Resolve-Bool $FetchDetails        "FetchDetails"         $true
+    $script:cfg_DetailDelayMs        = Resolve-Int  $DetailDelayMs       "DetailDelayMs"        50
+    $script:cfg_MaxRetries           = Resolve-Int  $MaxRetries          "MaxRetries"           3
+    $script:cfg_SkipCertificateCheck = Resolve-Bool $SkipCertificateCheck "SkipCertificateCheck" $true
+
+    if ($script:cfg_ExportFormat -notin @("CSV","JSON","Both")) {
+        throw "ExportFormat must be CSV, JSON, or Both. Got: '$($script:cfg_ExportFormat)'"
+    }
+}
+
+#endregion
+
+#region -- Pre-flight ---------------------------------------------------------
+
+function Test-ServerReachable {
+    param([string]$Hostname)
+    Write-Log "Pre-flight: DNS resolution for '$Hostname'..."
+    try {
+        $addrs = [System.Net.Dns]::GetHostAddresses($Hostname) |
+                 Select-Object -ExpandProperty IPAddressToString
+        Write-Log "  DNS OK -> $($addrs -join ', ')" "OK"
+    } catch { Write-Log "DNS resolution failed: $_" "ERROR"; return $false }
+
+    Write-Log "Pre-flight: TCP 443 connectivity..."
+    try {
+        $tcp   = New-Object System.Net.Sockets.TcpClient
+        $async = $tcp.BeginConnect($Hostname, 443, $null, $null)
+        $ok    = $async.AsyncWaitHandle.WaitOne(5000)
+        $tcp.Close()
+        if (-not $ok) { Write-Log "TCP 443 timed out." "ERROR"; return $false }
+        Write-Log "  TCP 443 OK." "OK"; return $true
+    } catch { Write-Log "TCP test failed: $_" "ERROR"; return $false }
+}
+
+function Assert-OutputWritable {
+    param([string]$Dir)
+    if (-not (Test-Path $Dir)) {
+        New-Item -ItemType Directory -Path $Dir -Force | Out-Null
+        Write-Log "Output directory created: $Dir" "OK"
+    }
+    $probe = Join-Path $Dir ".eset_excl_probe_$PID"
+    try {
+        [System.IO.File]::WriteAllText($probe, "ok")
+        Remove-Item $probe -Force -ErrorAction SilentlyContinue
+        Write-Log "Output directory is writable." "OK"
+    } catch { throw "Output directory '$Dir' is not writable: $_" }
+}
+
+#endregion
+
+#region -- API ----------------------------------------------------------------
+
+function New-ApiSplat {
+    param([string]$Uri, [string]$Method = "GET", [hashtable]$Headers = @{}, [object]$Body = $null)
+    $s = @{ Uri = $Uri; Method = $Method; Headers = $Headers; ContentType = "application/json"; UseBasicParsing = $true }
+    if ($null -ne $Body) { $s["Body"] = ($Body | ConvertTo-Json -Depth 10 -Compress) }
+    if ($script:cfg_SkipCertificateCheck -and $PSVersionTable.PSVersion.Major -ge 6) {
+        $s["SkipCertificateCheck"] = $true
+    }
+    return $s
+}
+
+function Invoke-ApiCall {
+    param([string]$Uri, [string]$Method = "GET", [hashtable]$Headers = @{}, [object]$Body = $null)
+    $attempt = 0
+    while ($true) {
+        $attempt++
+        try {
+            return Invoke-RestMethod @(New-ApiSplat -Uri $Uri -Method $Method -Headers $Headers -Body $Body)
+        } catch [System.Net.WebException] {
+            $response = $_.Exception.Response
+            $status   = if ($response) { [int]$response.StatusCode } else { 0 }
+            $body     = ""
+            if ($response) {
+                try { $sr = New-Object System.IO.StreamReader($response.GetResponseStream()); $body = $sr.ReadToEnd(); $sr.Close() } catch {}
+            }
+            $isRetryable = ($status -eq 429) -or ($status -ge 500) -or ($status -eq 0)
+            if (-not $isRetryable -or $attempt -ge $script:cfg_MaxRetries) {
+                $msg = "API call failed (HTTP $status) -- URI: $Uri"
+                if ($body) { $msg += "`n  Server: $body" }
+                throw $msg
+            }
+            $retryAfterMs = 0
+            if ($response -and $response.Headers["Retry-After"]) {
+                $ra = 0; if ([int]::TryParse($response.Headers["Retry-After"], [ref]$ra)) { $retryAfterMs = $ra * 1000 }
+            }
+            $backoffMs = [int][Math]::Max($retryAfterMs, ([Math]::Pow(2, $attempt - 1) * 1000))
+            Write-Log "  Attempt $attempt/$($script:cfg_MaxRetries) failed (HTTP $status). Retrying in ${backoffMs}ms..." "WARN"
+            Start-Sleep -Milliseconds $backoffMs
+        } catch {
+            if ($attempt -ge $script:cfg_MaxRetries) { throw }
+            $backoffMs = [int]([Math]::Pow(2, $attempt - 1) * 1000)
+            Write-Log "  Attempt $attempt/$($script:cfg_MaxRetries) error: $_. Retrying in ${backoffMs}ms..." "WARN"
+            Start-Sleep -Milliseconds $backoffMs
+        }
+    }
+}
+
+#endregion
+
+#region -- Authentication -----------------------------------------------------
+
+function Invoke-Authenticate {
+    param([string]$Pwd)
+    $splat       = New-ApiSplat -Uri "https://$($script:cfg_Server)/api/v1/authenticate" -Method "PUT"
+    $splat["Body"] = (@{ username = $script:cfg_Username; password = $Pwd; domain = $script:cfg_Domain } | ConvertTo-Json)
+    $resp = $null
+    try { $resp = Invoke-WebRequest @splat }
+    catch [System.Net.WebException] {
+        $status = if ($_.Exception.Response) { [int]$_.Exception.Response.StatusCode } else { 0 }
+        $hint   = switch ($status) {
+            401 { "Invalid username or password." }
+            403 { "Account lacks API access." }
+            404 { "Endpoint not found -- verify server address." }
+            0   { "No response -- check hostname and firewall." }
+            default { "Unexpected HTTP $status." }
+        }
+        throw "Authentication FAILED: $hint"
+    }
+
+    if ($resp.StatusCode -ne 200) { throw "Authentication returned HTTP $($resp.StatusCode)." }
+
+    $token = $null
+    try { $token = $resp.Headers["X-Security-Token"]; if ($token -is [System.Object[]]) { $token = $token[0] } } catch {}
+
+    if ([string]::IsNullOrWhiteSpace($token)) { throw "Authentication returned HTTP 200 but no X-Security-Token header." }
+    if ($token.Length -lt 16)                 { throw "X-Security-Token too short (length=$($token.Length))." }
+
+    Write-Log "Authentication SUCCESS -- token received (length=$($token.Length))." "OK"
+    $script:AuthTime = Get-Date
+    return $token
+}
+
+function Test-TokenAge {
+    if ($null -ne $script:AuthTime -and ((Get-Date) - $script:AuthTime).TotalMinutes -gt 20) {
+        Write-Log "Session token is over 20 minutes old -- if you see HTTP 401 errors, re-run." "WARN"
+        $script:AuthTime = Get-Date
+    }
+}
+
+#endregion
+
+#region -- Exclusion helpers --------------------------------------------------
+
+function ConvertTo-FlatExclusion {
+    param([PSCustomObject]$E, [PSCustomObject]$Detail = $null)
+
+    # Pull from detail if available, fall back to list object
+    $src = if ($null -ne $Detail) { $Detail } else { $E }
+
+    # ruleIds and ruleUuids come as arrays -- join for CSV friendliness
+    $ruleIds   = try { $ids = Get-Prop $src 'ruleIds';   if ($ids)   { @($ids)   -join ', ' } else { "" } } catch { "" }
+    $ruleUuids = try { $ids = Get-Prop $src 'ruleUuids'; if ($ids)   { @($ids)   -join ', ' } else { "" } } catch { "" }
+
+    # XML body -- from detail only
+    $xmlBody = ""
+    if ($null -ne $Detail) {
+        $bodyProp = $Detail.PSObject.Properties['body']
+        if ($null -ne $bodyProp -and $null -ne $bodyProp.Value) {
+            $xmlBody = "$($bodyProp.Value)".Trim()
+        }
+    }
+
+    [PSCustomObject]@{
+        id          = Get-Prop $E 'id'
+        uuid        = Get-Prop $E 'uuid'
+        name        = Get-Prop $E 'name'       ""
+        enabled     = Get-Prop $E 'enabled'
+        note        = Get-Prop $E 'note'        ""
+        ruleIds     = $ruleIds
+        ruleUuids   = $ruleUuids
+        ruleCount   = if ($ruleIds -ne "") { ($ruleIds -split ',').Count } else { 0 }
+        xmlBody     = $xmlBody
+        # Derived fields useful for review
+        hasXml      = ($xmlBody -ne "")
+        isDisabled  = (-not [bool](Get-Prop $E 'enabled' $false))
+        linkedRules = if ($ruleIds -ne "") { $true } else { $false }
+    }
+}
+
+#endregion
+
+#region -- Output helpers -----------------------------------------------------
+
+function Get-SafeOutputPath {
+    param([string]$Dir, [string]$Base, [string]$Ext)
+    $candidate = Join-Path $Dir "$Base.$Ext"
+    $counter   = 1
+    while (Test-Path $candidate) { $candidate = Join-Path $Dir "${Base}_${counter}.$Ext"; $counter++ }
+    return $candidate
+}
+
+function Save-RunLog {
+    param([string]$Dir, [string]$Base, [hashtable]$Meta)
+    try {
+        $path = Get-SafeOutputPath -Dir $Dir -Base "${Base}_runlog" -Ext "json"
+        @{ meta = $Meta; log = $script:RunLog } |
+            ConvertTo-Json -Depth 10 | Out-File -FilePath $path -Encoding UTF8
+        Write-Log "Run log -> $path" "OK"
+    } catch { Write-Log "Could not save run log: $_" "WARN" }
+}
+
+function Export-Data {
+    param([System.Collections.Generic.List[object]]$Data, [string]$Base, [string]$Dir, [string]$Format)
+    if ($Data.Count -eq 0) { return }
+    if ($Format -in @("CSV","Both")) {
+        $path = Get-SafeOutputPath -Dir $Dir -Base $Base -Ext "csv"
+        $Data | Export-Csv -Path $path -NoTypeInformation -Encoding UTF8
+        Write-Log "CSV -> $path" "OK"
+    }
+    if ($Format -in @("JSON","Both")) {
+        $path = Get-SafeOutputPath -Dir $Dir -Base $Base -Ext "json"
+        $Data | ConvertTo-Json -Depth 10 | Out-File -FilePath $path -Encoding UTF8
+        Write-Log "JSON -> $path" "OK"
+    }
+}
+
+#endregion
+
+#region -- Main ---------------------------------------------------------------
+
+$allExclusions = [System.Collections.Generic.List[object]]::new()
+$enriched      = [System.Collections.Generic.List[object]]::new()
+$detailErrors  = 0
+$totalCount    = 0
+$timestamp     = Get-Date -Format "yyyyMMdd_HHmmss"
+$baseName      = "ESET_Inspect_Exclusions_$timestamp"
+
+try {
+    # -- Banner ----------------------------------------------------------------
+    Write-Log "======================================================"
+    Write-Log " ESET Inspect On-Prem -- Exclusion Exporter v1.0"
+    Write-Log " Started : $($script:RunStart.ToString('yyyy-MM-dd HH:mm:ss'))"
+    Write-Log "======================================================"
+
+    # -- Load config -----------------------------------------------------------
+    $fileCfg = Read-Config
+    Merge-Config -Cfg $fileCfg
+
+    if ([string]::IsNullOrWhiteSpace($script:cfg_Server))   { throw "Server is required. Supply via -Server or config file." }
+    if ([string]::IsNullOrWhiteSpace($script:cfg_Username)) { throw "Username is required. Supply via -Username or config file." }
+
+    Write-Log "Server          : $($script:cfg_Server)"
+    Write-Log "Username        : $($script:cfg_Username)"
+    Write-Log "IncludeDisabled : $($script:cfg_IncludeDisabled)"
+    Write-Log "FetchDetails    : $($script:cfg_FetchDetails)"
+    Write-Log "ExportFormat    : $($script:cfg_ExportFormat)"
+    Write-Log "OutputPath      : $($script:cfg_OutputPath)"
+    Write-Log "------------------------------------------------------"
+
+    # -- TLS -------------------------------------------------------------------
+    if ($script:cfg_SkipCertificateCheck) {
+        Enable-TlsBypass
+        Write-Log "TLS certificate verification DISABLED." "WARN"
+    }
+
+    # -- Output dir ------------------------------------------------------------
+    Assert-OutputWritable -Dir $script:cfg_OutputPath
+
+    # -- Network pre-flight ----------------------------------------------------
+    if (-not (Test-ServerReachable -Hostname $script:cfg_Server)) {
+        throw "Server '$($script:cfg_Server)' unreachable on TCP 443."
+    }
+
+    # -- Password --------------------------------------------------------------
+    if ([string]::IsNullOrEmpty($script:cfg_Password)) {
+        $secPwd              = Read-Host -Prompt "Password for '$($script:cfg_Username)'" -AsSecureString
+        $bstr                = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($secPwd)
+        $script:cfg_Password = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr)
+        [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
+    }
+    if ([string]::IsNullOrWhiteSpace($script:cfg_Password)) { throw "Password cannot be empty." }
+
+    # -- Authenticate ----------------------------------------------------------
+    Write-Log "Authenticating as '$($script:cfg_Username)'..."
+    $token               = Invoke-Authenticate -Pwd $script:cfg_Password
+    $script:cfg_Password = "x" * $script:cfg_Password.Length; $script:cfg_Password = ""
+    $authHeaders         = @{ "Authorization" = "Bearer $token" }
+    $baseUrl             = "https://$($script:cfg_Server)"
+
+    # -- Total count -----------------------------------------------------------
+    Write-Log "Querying total exclusion count..."
+    $countResp = Invoke-ApiCall -Uri "$baseUrl/api/v1/exclusions?`$count=1" -Headers $authHeaders
+    $countProp = $countResp.PSObject.Properties['count']
+    if ($null -eq $countProp) { throw "API response missing 'count' field." }
+    $totalCount = [int]$countProp.Value
+    Write-Log "Total exclusions: $totalCount" "OK"
+
+    if ($totalCount -eq 0) { Write-Log "No exclusions found." "WARN"; exit 0 }
+
+    # -- Paginate list ---------------------------------------------------------
+    $pageSize  = 100
+    $pageCount = [Math]::Ceiling($totalCount / $pageSize)
+    Write-Log "Fetching $totalCount exclusion(s) across $pageCount page(s)..."
+
+    for ($page = 0; $page -lt $pageCount; $page++) {
+        Test-TokenAge
+        $skip     = $page * $pageSize
+        $pageResp = Invoke-ApiCall -Uri "$baseUrl/api/v1/exclusions?`$skip=$skip&`$top=$pageSize&`$orderBy=name asc" -Headers $authHeaders
+        $valProp  = if ($null -ne $pageResp) { $pageResp.PSObject.Properties['value'] } else { $null }
+        if ($null -eq $valProp -or $null -eq $valProp.Value) {
+            Write-Log "Page $($page+1) returned no data -- skipping." "WARN"; continue
+        }
+
+        $batch = @($valProp.Value)
+
+        # Filter disabled if requested
+        if (-not $script:cfg_IncludeDisabled) {
+            $batch = $batch | Where-Object {
+                $ep = $_.PSObject.Properties['enabled']
+                $null -ne $ep -and [bool]$ep.Value -eq $true
+            }
+        }
+
+        $allExclusions.AddRange([object[]]$batch)
+        Write-Progress -Id 1 -Activity "Fetching exclusion list" `
+            -Status "Page $($page+1) of $pageCount  |  $($allExclusions.Count) collected" `
+            -PercentComplete ([int](($page+1)/$pageCount*100))
+    }
+    Write-Progress -Id 1 -Activity "Fetching exclusion list" -Completed
+    Write-Log "List fetch complete: $($allExclusions.Count) exclusion(s)." "OK"
+
+    if ($allExclusions.Count -eq 0) { Write-Log "No exclusions after filtering." "WARN"; exit 0 }
+
+    # -- Detail fetch (XML body) -----------------------------------------------
+    if ($script:cfg_FetchDetails) {
+        Write-Log "Fetching full detail per exclusion (XML criteria body)..."
+        $fetched = 0
+        foreach ($excl in $allExclusions) {
+            Test-TokenAge
+            $fetched++
+            $exclId = Get-Prop $excl 'id' '(unknown)'
+            Write-Progress -Id 2 -Activity "Fetching exclusion details" `
+                -Status "$fetched / $($allExclusions.Count)  |  id=$exclId  |  errors=$detailErrors" `
+                -PercentComplete ([int]($fetched/$allExclusions.Count*100))
+            try {
+                $detail = Invoke-ApiCall -Uri "$baseUrl/api/v1/exclusions/$exclId" -Headers $authHeaders
+                $enriched.Add((ConvertTo-FlatExclusion $excl $detail))
+            } catch {
+                $detailErrors++
+                Write-Log "  Detail fetch FAILED for id=$exclId : $_ -- using list data." "WARN"
+                $enriched.Add((ConvertTo-FlatExclusion $excl $null))
+            }
+            if ($script:cfg_DetailDelayMs -gt 0) { Start-Sleep -Milliseconds $script:cfg_DetailDelayMs }
+        }
+        Write-Progress -Id 2 -Activity "Fetching exclusion details" -Completed
+        if ($detailErrors -gt 0) {
+            Write-Log "$detailErrors detail fetch(es) failed -- XML body may be empty for those." "WARN"
+        } else {
+            Write-Log "All detail fetches completed successfully." "OK"
+        }
+    } else {
+        Write-Log "FetchDetails=false -- XML body will be empty." "WARN"
+        foreach ($excl in $allExclusions) { $enriched.Add((ConvertTo-FlatExclusion $excl $null)) }
+    }
+
+    Write-Log "$($enriched.Count) exclusion(s) ready for export." "OK"
+
+    # -- Export ----------------------------------------------------------------
+    Export-Data -Data $enriched -Base $baseName -Dir $script:cfg_OutputPath -Format $script:cfg_ExportFormat
+
+    # -- Summary stats ---------------------------------------------------------
+    $disabled   = @($enriched | Where-Object { $true -eq $_.isDisabled }).Count
+    $noXml      = @($enriched | Where-Object { $false -eq $_.hasXml }).Count
+    $noRules    = @($enriched | Where-Object { $false -eq $_.linkedRules }).Count
+
+    # -- Run log ---------------------------------------------------------------
+    Save-RunLog -Dir $script:cfg_OutputPath -Base $baseName -Meta @{
+        scriptVersion   = "1.0"
+        runStart        = $script:RunStart.ToString("o")
+        runEnd          = (Get-Date).ToString("o")
+        durationSeconds = [int]((Get-Date) - $script:RunStart).TotalSeconds
+        server          = $script:cfg_Server
+        username        = $script:cfg_Username
+        totalFound      = $totalCount
+        totalExported   = $enriched.Count
+        disabledCount   = $disabled
+        noXmlCount      = $noXml
+        noRulesCount    = $noRules
+        detailErrors    = $detailErrors
+        exportFormat    = $script:cfg_ExportFormat
+        outputPath      = $script:cfg_OutputPath
+    }
+
+    # -- Summary ---------------------------------------------------------------
+    $duration = [int]((Get-Date) - $script:RunStart).TotalSeconds
+    Write-Log "======================================================"
+    Write-Log " Export complete in ${duration}s"
+    Write-Log " Total exported  : $($enriched.Count)"
+    Write-Log " Disabled        : $disabled"
+    Write-Log " No XML body     : $noXml"
+    Write-Log " Not linked      : $noRules (not associated with any rule)"
+    Write-Log "======================================================"
+
+} catch {
+    $script:ExitCode = 1
+    Write-Log "FATAL ERROR: $_" "ERROR"
+    Write-Log $_.ScriptStackTrace "DEBUG"
+    try {
+        $emergBase = "ESET_Inspect_Exclusions_FAILED_$(Get-Date -Format 'yyyyMMdd_HHmmss')"
+        $emergDir  = if ($script:cfg_OutputPath -and (Test-Path $script:cfg_OutputPath -IsValid)) { $script:cfg_OutputPath } else { (Get-Location).Path }
+        Save-RunLog -Dir $emergDir -Base $emergBase -Meta @{
+            fatalError = $_.ToString(); stackTrace = $_.ScriptStackTrace
+        }
+        if ($enriched.Count -gt 0) {
+            Export-Data -Data $enriched -Base "${emergBase}_partial" -Dir $emergDir -Format $script:cfg_ExportFormat
+        }
+    } catch { Write-Host "[WARN] Could not save emergency log: $_" -ForegroundColor Yellow }
+} finally {
+    Write-Progress -Id 1 -Activity "Fetching exclusion list"    -Completed -ErrorAction SilentlyContinue
+    Write-Progress -Id 2 -Activity "Fetching exclusion details" -Completed -ErrorAction SilentlyContinue
+}
+
+exit $script:ExitCode
+
+#endregion
