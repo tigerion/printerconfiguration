@@ -412,11 +412,19 @@ function ConvertTo-FlatExclusion {
         }
     }
 
+    # Try to extract author/creator from the detail object (field names vary by version)
+    $author = ""
+    foreach ($candidate in @('createdBy','authorName','author','creatorName','creator','modifiedBy','userName')) {
+        $val = Get-Prop $src $candidate ""
+        if ($val -ne "") { $author = $val; break }
+    }
+
     [PSCustomObject]@{
         id          = Get-Prop $E 'id'
         uuid        = Get-Prop $E 'uuid'
         name        = Get-Prop $E 'name'       ""
         enabled     = Get-Prop $E 'enabled'
+        author      = $author
         note        = Get-Prop $E 'note'        ""
         ruleIds     = $ruleIds
         ruleUuids   = $ruleUuids
@@ -492,6 +500,7 @@ function Export-Data {
                 ruleUuids   = $_.ruleUuids
                 ruleCount   = $_.ruleCount
                 linkedRules  = $_.linkedRules
+                author       = $_.author
                 targetIds    = $_.targetIds
                 targetUuids  = $_.targetUuids
                 hasXml       = $_.hasXml
