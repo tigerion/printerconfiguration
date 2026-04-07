@@ -297,6 +297,7 @@ function Invoke-ApiCall {
         $attempt++
         try {
             $splat = New-ApiSplat -Uri $Uri -Method $Method -Headers $Headers -Body $Body
+            Write-Log "API CALL: $Method $Uri  |  splat keys: $($splat.Keys -join ', ')  |  has Body: $($splat.ContainsKey('Body'))  |  has ContentType: $($splat.ContainsKey('ContentType'))" "DEBUG"
             return Invoke-RestMethod @splat
         } catch [System.Net.WebException] {
             $response = $_.Exception.Response
@@ -333,8 +334,9 @@ function Invoke-ApiCall {
 
 function Invoke-Authenticate {
     param([string]$Pwd)
-    $splat       = New-ApiSplat -Uri "https://$($script:cfg_Server)/api/v1/authenticate" -Method "PUT"
-    $splat["Body"] = (@{ username = $script:cfg_Username; password = $Pwd; domain = $script:cfg_Domain } | ConvertTo-Json)
+    $splat                  = New-ApiSplat -Uri "https://$($script:cfg_Server)/api/v1/authenticate" -Method "PUT"
+    $splat["Body"]          = (@{ username = $script:cfg_Username; password = $Pwd; domain = $script:cfg_Domain } | ConvertTo-Json)
+    $splat["ContentType"]   = "application/json" 
     $resp = $null
     try { $resp = Invoke-WebRequest @splat }
     catch [System.Net.WebException] {
