@@ -376,34 +376,108 @@ function Test-TokenAge {
 #region -- Exclusion helpers --------------------------------------------------
 
 function Resolve-ExclusionObject {
-    # The detail endpoint wraps the exclusion inside an "EXCLUSION" property:
-    # { "EXCLUSION": { body, enabled, id, name, note, ruleIds, ruleUuids, ... } }
-    # Unwrap it so ConvertTo-FlatExclusion always receives a flat object.
+    # The GET /api/v1/exclusions/{id} detail endpoint wraps the exclusion inside
+    # an "EXCLUSION" property. Unwrap it to get the flat object with the XML body.
     param([PSCustomObject]$Raw)
     if ($null -eq $Raw) { return $null }
     $wrapper = $Raw.PSObject.Properties['EXCLUSION']
-    if ($null -ne $wrapper -and $null -ne $wrapper.Value) {
-        return $wrapper.Value   # detail endpoint -- unwrap
-    }
-    return $Raw                 # list endpoint -- already flat
+    if ($null -ne $wrapper -and $null -ne $wrapper.Value) { return $wrapper.Value }
+    return $Raw
+}
+
+function Get-FrontendExclusions {
+    <#
+    Fetch all exclusions from POST /frontend/exclusions/0 which returns rich metadata
+    including author, isAdvanced, targets, hitCount, ruleName, timestamp, and criteria
+    counts -- fields not available in the documented REST API.
+    Uses pageToken-based pagination to retrieve all records.
+    #>
+    param([string]$BaseUrl, [hashtable]$Headers)
+
+    $allEntities = [System.Collections.Generic.List[object]]::new()
+    $pageToken   = ""
+    $pageNum     = 0
+
+    $requiredFields = @(
+        "id","enabled","ruleStatus","accessGroupId","accessGroupPath","isInternal",
+        "name","author","creatorUuid","timestamp","criteria","isAdvanced",
+        "fileNames","filePaths","cmdLines","signers","hashes","users",
+        "accessGroup","ruleName","rulesCount","hitCount","note","targets","uuid"
+    )
+
+    do {
+        $pageNum++
+        # Build filter tree -- always exclude deleted; optionally filter by date
+        $andClauses = [System.Collections.Generic.List[object]]::new()
+        $andClauses.Add(@{ deleted = @{ EQ = 0 } })
+
+        if ($script:cfg_DaysBack -gt 0) {
+            $since = (Get-Date).ToUniversalTime().AddDays(-$script:cfg_DaysBack).ToString("yyyy-MM-ddTHH:mm:ssZ")
+            $andClauses.Add(@{ timestamp = @{ GE = $since } })
+            Write-Log "  Applying DaysBack=$($script:cfg_DaysBack) filter: timestamp >= $since"
+        }
+
+        $body = @{
+            pageSize     = 100
+            forceRefresh = $false
+            groupId      = 1
+            pageToken    = $pageToken
+            localFilters = @{
+                filterTree = @{ AND = $andClauses.ToArray() }
+                subgroups  = $false
+            }
+            sortOrders     = @( @{ column = "timestamp"; ascend = $false } )
+            requiredFields = $requiredFields
+            sessionId      = [guid]::NewGuid().ToString()
+        }
+
+        Write-Log "  Frontend page $pageNum (token='$pageToken')..."
+        $resp = Invoke-ApiCall -Uri "$BaseUrl/frontend/exclusions/0" -Method "POST" -Headers $Headers -Body $body
+
+        $entProp = $resp.PSObject.Properties['entities']
+        if ($null -eq $entProp -or $null -eq $entProp.Value) {
+            Write-Log "  No entities in frontend response -- stopping pagination." "WARN"
+            break
+        }
+
+        $batch = @($entProp.Value)
+        $allEntities.AddRange([object[]]$batch)
+
+        # Get next page token
+        $tokenProp = $resp.PSObject.Properties['pageToken']
+        $pageToken = if ($null -ne $tokenProp -and $null -ne $tokenProp.Value) { "$($tokenProp.Value)" } else { "" }
+
+        # Stop if we got fewer than pageSize (last page) or no token
+        $totalProp = $resp.PSObject.Properties['totalCount']
+        $total     = if ($null -ne $totalProp) { [int]$totalProp.Value } else { 0 }
+
+        Write-Log "  Page $pageNum : $($batch.Count) entities (total: $($allEntities.Count) / $total)" "OK"
+
+        if ($batch.Count -lt 100 -or $pageToken -eq "") { break }
+
+    } while ($true)
+
+    Write-Log "Frontend fetch complete: $($allEntities.Count) entities." "OK"
+    return $allEntities
 }
 
 function ConvertTo-FlatExclusion {
-    param([PSCustomObject]$E, [PSCustomObject]$RawDetail = $null)
+    <#
+    Merges data from three sources:
+      $F  = frontend entity  (POST /frontend/exclusions/0) -- rich metadata, author, targets etc.
+      $E  = API list object  (GET /api/v1/exclusions)      -- uuid, ruleIds, ruleUuids
+      $RawDetail = API detail (GET /api/v1/exclusions/{id}) -- XML body only
+    #>
+    param(
+        [PSCustomObject]$F,           # frontend entity (primary source)
+        [PSCustomObject]$E = $null,   # API list object (for uuid / ruleIds)
+        [PSCustomObject]$RawDetail = $null  # API detail for XML body
+    )
 
-    # Unwrap EXCLUSION wrapper from detail response if present
+    # Unwrap EXCLUSION wrapper from detail if present
     $detail = if ($null -ne $RawDetail) { Resolve-ExclusionObject $RawDetail } else { $null }
 
-    # Pull from unwrapped detail if available, fall back to list object
-    $src = if ($null -ne $detail) { $detail } else { $E }
-
-    # ruleIds, ruleUuids, targetIds, targetUuids come as arrays -- join for CSV friendliness
-    $ruleIds    = try { $ids = Get-Prop $src 'ruleIds';    if ($ids) { @($ids) -join ', ' } else { "" } } catch { "" }
-    $ruleUuids  = try { $ids = Get-Prop $src 'ruleUuids';  if ($ids) { @($ids) -join ', ' } else { "" } } catch { "" }
-    $targetIds  = try { $ids = Get-Prop $src 'targetIds';  if ($ids) { @($ids) -join ', ' } else { "" } } catch { "" }
-    $targetUuids = try { $ids = Get-Prop $src 'targetUuids'; if ($ids) { @($ids) -join ', ' } else { "" } } catch { "" }
-
-    # XML body -- from detail only (inside the unwrapped object)
+    # XML body -- only available from the detail endpoint
     $xmlBody = ""
     if ($null -ne $detail) {
         $bodyProp = $detail.PSObject.Properties['body']
@@ -412,30 +486,71 @@ function ConvertTo-FlatExclusion {
         }
     }
 
-    # Try to extract author/creator from the detail object (field names vary by version)
-    $author = ""
-    foreach ($candidate in @('createdBy','authorName','author','creatorName','creator','modifiedBy','userName')) {
-        $val = Get-Prop $src $candidate ""
-        if ($val -ne "") { $author = $val; break }
+    # ruleIds and ruleUuids from the API list object (not in frontend response)
+    $ruleIds   = ""
+    $ruleUuids = ""
+    if ($null -ne $E) {
+        $ruleIds   = try { $ids = Get-Prop $E 'ruleIds';   if ($ids) { @($ids) -join ', ' } else { "" } } catch { "" }
+        $ruleUuids = try { $ids = Get-Prop $E 'ruleUuids'; if ($ids) { @($ids) -join ', ' } else { "" } } catch { "" }
     }
 
+    # targets from frontend uses &#1; (char code 1) as separator -- replace with comma
+    $targetsRaw = Get-Prop $F 'targets' ""
+    $targets    = $targetsRaw -replace [char]1, ', '
+
+    # ruleName from frontend also uses &#1; separator
+    $ruleNameRaw = Get-Prop $F 'ruleName' ""
+    $ruleName    = $ruleNameRaw -replace [char]1, '; '
+
+    # Derive uuid -- prefer API list object, fall back to frontend
+    $uuid = if ($null -ne $E) { Get-Prop $E 'uuid' "" } else { Get-Prop $F 'uuid' "" }
+
     [PSCustomObject]@{
-        id          = Get-Prop $E 'id'
-        uuid        = Get-Prop $E 'uuid'
-        name        = Get-Prop $E 'name'       ""
-        enabled     = Get-Prop $E 'enabled'
-        author      = $author
-        note        = Get-Prop $E 'note'        ""
-        ruleIds     = $ruleIds
-        ruleUuids   = $ruleUuids
-        ruleCount   = if ($ruleIds -ne "") { ($ruleIds -split ',').Count } else { 0 }
-        xmlBody     = $xmlBody
-        # Derived fields useful for review
-        targetIds   = $targetIds
-        targetUuids = $targetUuids
-        hasXml      = ($xmlBody -ne "")
-        isDisabled  = (-not [bool](Get-Prop $E 'enabled' $false))
-        linkedRules = if ($ruleIds -ne "") { $true } else { $false }
+        # ── Identifiers ──────────────────────────────────────────────────────
+        id              = Get-Prop $F 'id'
+        uuid            = $uuid
+
+        # ── Core fields ──────────────────────────────────────────────────────
+        name            = Get-Prop $F 'name'       ""
+        enabled         = Get-Prop $F 'enabled'
+        note            = Get-Prop $F 'note'        ""
+
+        # ── Author / ownership ───────────────────────────────────────────────
+        author          = Get-Prop $F 'author'      ""
+        creatorUuid     = Get-Prop $F 'creatorUuid' ""
+        timestamp       = Get-Prop $F 'timestamp'   ""
+        accessGroup     = Get-Prop $F 'accessGroup' ""
+
+        # ── Rule linkage ─────────────────────────────────────────────────────
+        ruleName        = $ruleName
+        rulesCount      = Get-Prop $F 'rulesCount'  0
+        ruleIds         = $ruleIds
+        ruleUuids       = $ruleUuids
+
+        # ── Targets ──────────────────────────────────────────────────────────
+        targets         = $targets
+
+        # ── Exclusion type ───────────────────────────────────────────────────
+        isAdvanced      = Get-Prop $F 'isAdvanced'  $false
+        isInternal      = Get-Prop $F 'isInternal'  0
+        hitCount        = Get-Prop $F 'hitCount'    0
+
+        # ── Criteria counts (how many of each criteria type are configured) ──
+        criteriaFiles   = Get-Prop $F 'fileNames'   0
+        criteriaPaths   = Get-Prop $F 'filePaths'   0
+        criteriaCmdLine = Get-Prop $F 'cmdLines'     0
+        criteriaSigners = Get-Prop $F 'signers'      0
+        criteriaHashes  = Get-Prop $F 'hashes'       0
+        criteriaUsers   = Get-Prop $F 'users'        0
+
+        # ── XML body (detail endpoint only) ──────────────────────────────────
+        xmlBody         = $xmlBody
+
+        # ── Derived ──────────────────────────────────────────────────────────
+        hasXml          = ($xmlBody -ne "")
+        isDisabled      = (-not [bool](Get-Prop $F 'enabled' $false))
+        linkedRules     = ([int](Get-Prop $F 'rulesCount' 0) -gt 0)
+        ruleCount       = [int](Get-Prop $F 'rulesCount' 0)
     }
 }
 
@@ -499,13 +614,24 @@ function Export-Data {
                 ruleIds     = $_.ruleIds
                 ruleUuids   = $_.ruleUuids
                 ruleCount   = $_.ruleCount
-                linkedRules  = $_.linkedRules
-                author       = $_.author
-                targetIds    = $_.targetIds
-                targetUuids  = $_.targetUuids
-                hasXml       = $_.hasXml
-                xmlType      = $xmlType
-                xmlSummary   = $xmlSum
+                linkedRules     = $_.linkedRules
+                author          = $_.author
+                creatorUuid     = $_.creatorUuid
+                timestamp       = $_.timestamp
+                accessGroup     = $_.accessGroup
+                targets         = $_.targets
+                isAdvanced      = $_.isAdvanced
+                isInternal      = $_.isInternal
+                hitCount        = $_.hitCount
+                criteriaFiles   = $_.criteriaFiles
+                criteriaPaths   = $_.criteriaPaths
+                criteriaCmdLine = $_.criteriaCmdLine
+                criteriaSigners = $_.criteriaSigners
+                criteriaHashes  = $_.criteriaHashes
+                criteriaUsers   = $_.criteriaUsers
+                hasXml          = $_.hasXml
+                xmlType         = $xmlType
+                xmlSummary      = $xmlSum
             }
         }
         $path = Get-SafeOutputPath -Dir $Dir -Base $Base -Ext "csv"
@@ -577,82 +703,84 @@ try {
     $authHeaders         = @{ "Authorization" = "Bearer $token" }
     $baseUrl             = "https://$($script:cfg_Server)"
 
-    # -- Total count -----------------------------------------------------------
-    Write-Log "Querying total exclusion count..."
-    $countResp = Invoke-ApiCall -Uri "$baseUrl/api/v1/exclusions?`$count=1" -Headers $authHeaders
-    $countProp = $countResp.PSObject.Properties['count']
-    if ($null -eq $countProp) { throw "API response missing 'count' field." }
-    $totalCount = [int]$countProp.Value
-    Write-Log "Total exclusions: $totalCount" "OK"
+    # -- Step 1: Fetch rich metadata from frontend endpoint -------------------
+    # POST /frontend/exclusions/0 returns all fields including author, isAdvanced,
+    # targets, hitCount, ruleName, timestamp -- not available in the REST API.
+    Write-Log "Fetching exclusion metadata from frontend endpoint..."
+    $frontendEntities = Get-FrontendExclusions -BaseUrl $baseUrl -Headers $authHeaders
 
-    if ($totalCount -eq 0) { Write-Log "No exclusions found." "WARN"; exit 0 }
+    if ($frontendEntities.Count -eq 0) { Write-Log "No exclusions found." "WARN"; exit 0 }
 
-    # -- Paginate list ---------------------------------------------------------
-    $pageSize  = 100
-    $pageCount = [Math]::Ceiling($totalCount / $pageSize)
-    Write-Log "Fetching $totalCount exclusion(s) across $pageCount page(s)..."
+    # Apply IncludeDisabled filter
+    $frontendEntities = [System.Collections.Generic.List[object]]@(
+        $frontendEntities | Where-Object {
+            $script:cfg_IncludeDisabled -or [bool](Get-Prop $_ 'enabled' $true)
+        }
+    )
 
-    for ($page = 0; $page -lt $pageCount; $page++) {
+    $totalCount = $frontendEntities.Count
+    Write-Log "Frontend fetch complete: $totalCount exclusion(s)." "OK"
+    if ($totalCount -eq 0) { Write-Log "No exclusions after filtering." "WARN"; exit 0 }
+
+    # -- Step 2: Fetch API list for ruleIds/ruleUuids (not in frontend) --------
+    Write-Log "Fetching API list for ruleIds and ruleUuids..."
+    $apiListById = @{}
+    $apiPageSize  = 100
+    $apiPageCount = [Math]::Ceiling($totalCount / $apiPageSize)
+
+    for ($page = 0; $page -lt $apiPageCount; $page++) {
         Test-TokenAge
-        $skip     = $page * $pageSize
-        $pageResp = Invoke-ApiCall -Uri "$baseUrl/api/v1/exclusions?`$skip=$skip&`$top=$pageSize&`$orderBy=name asc" -Headers $authHeaders
+        $skip     = $page * $apiPageSize
+        $pageResp = Invoke-ApiCall -Uri "$baseUrl/api/v1/exclusions?`$skip=$skip&`$top=$apiPageSize" -Headers $authHeaders
         $valProp  = if ($null -ne $pageResp) { $pageResp.PSObject.Properties['value'] } else { $null }
-        if ($null -eq $valProp -or $null -eq $valProp.Value) {
-            Write-Log "Page $($page+1) returned no data -- skipping." "WARN"; continue
+        if ($null -eq $valProp -or $null -eq $valProp.Value) { continue }
+        foreach ($item in @($valProp.Value)) {
+            $itemId = Get-Prop $item 'id' $null
+            if ($null -ne $itemId) { $apiListById["$itemId"] = $item }
         }
-
-        $batch = @($valProp.Value)
-
-        # Filter disabled if requested
-        if (-not $script:cfg_IncludeDisabled) {
-            $batch = $batch | Where-Object {
-                $ep = $_.PSObject.Properties['enabled']
-                $null -ne $ep -and [bool]$ep.Value -eq $true
-            }
-        }
-
-        $allExclusions.AddRange([object[]]$batch)
-        Write-Progress -Id 1 -Activity "Fetching exclusion list" `
-            -Status "Page $($page+1) of $pageCount  |  $($allExclusions.Count) collected" `
-            -PercentComplete ([int](($page+1)/$pageCount*100))
+        Write-Progress -Id 1 -Activity "Fetching API list" `
+            -Status "Page $($page+1) of $apiPageCount  |  $($apiListById.Count) fetched" `
+            -PercentComplete ([int](($page+1)/$apiPageCount*100))
     }
-    Write-Progress -Id 1 -Activity "Fetching exclusion list" -Completed
-    Write-Log "List fetch complete: $($allExclusions.Count) exclusion(s)." "OK"
+    Write-Progress -Id 1 -Activity "Fetching API list" -Completed
+    Write-Log "API list fetched: $($apiListById.Count) entries." "OK"
 
-
-    if ($allExclusions.Count -eq 0) { Write-Log "No exclusions after filtering." "WARN"; exit 0 }
-
-    # -- Detail fetch (XML body) -----------------------------------------------
+    # -- Step 3: Fetch XML body per exclusion (GET /api/v1/exclusions/{id}) ----
     if ($script:cfg_FetchDetails) {
-        Write-Log "Fetching full detail per exclusion (XML criteria body)..."
+        Write-Log "Fetching XML body per exclusion ($totalCount calls)..."
         $fetched = 0
-        foreach ($excl in $allExclusions) {
+        foreach ($fe in $frontendEntities) {
             Test-TokenAge
             $fetched++
-            $exclId = Get-Prop $excl 'id' '(unknown)'
-            Write-Progress -Id 2 -Activity "Fetching exclusion details" `
-                -Status "$fetched / $($allExclusions.Count)  |  id=$exclId  |  errors=$detailErrors" `
-                -PercentComplete ([int]($fetched/$allExclusions.Count*100))
+            $exclId   = Get-Prop $fe 'id' '(unknown)'
+            $apiEntry = if ($apiListById.ContainsKey("$exclId")) { $apiListById["$exclId"] } else { $null }
+
+            Write-Progress -Id 2 -Activity "Fetching XML bodies" `
+                -Status "$fetched / $totalCount  |  id=$exclId  |  errors=$detailErrors" `
+                -PercentComplete ([int]($fetched/$totalCount*100))
             try {
                 $detail = Invoke-ApiCall -Uri "$baseUrl/api/v1/exclusions/$exclId" -Headers $authHeaders
-
-                $enriched.Add((ConvertTo-FlatExclusion $excl $detail))
+                $enriched.Add((ConvertTo-FlatExclusion $fe $apiEntry $detail))
             } catch {
                 $detailErrors++
-                Write-Log "  Detail fetch FAILED for id=$exclId : $_ -- using list data." "WARN"
-                $enriched.Add((ConvertTo-FlatExclusion $excl $null))
+                Write-Log "  XML fetch FAILED for id=$exclId : $_ -- skipping XML." "WARN"
+                $enriched.Add((ConvertTo-FlatExclusion $fe $apiEntry $null))
             }
             if ($script:cfg_DetailDelayMs -gt 0) { Start-Sleep -Milliseconds $script:cfg_DetailDelayMs }
         }
-        Write-Progress -Id 2 -Activity "Fetching exclusion details" -Completed
+        Write-Progress -Id 2 -Activity "Fetching XML bodies" -Completed
         if ($detailErrors -gt 0) {
-            Write-Log "$detailErrors detail fetch(es) failed -- XML body may be empty for those." "WARN"
+            Write-Log "$detailErrors XML fetch(es) failed -- xmlBody will be empty for those." "WARN"
         } else {
-            Write-Log "All detail fetches completed successfully." "OK"
+            Write-Log "All XML fetches completed successfully." "OK"
         }
     } else {
-        Write-Log "FetchDetails=false -- XML body will be empty." "WARN"
-        foreach ($excl in $allExclusions) { $enriched.Add((ConvertTo-FlatExclusion $excl $null)) }
+        Write-Log "FetchDetails=false -- xmlBody will be empty." "WARN"
+        foreach ($fe in $frontendEntities) {
+            $exclId   = Get-Prop $fe 'id' '(unknown)'
+            $apiEntry = if ($apiListById.ContainsKey("$exclId")) { $apiListById["$exclId"] } else { $null }
+            $enriched.Add((ConvertTo-FlatExclusion $fe $apiEntry $null))
+        }
     }
 
     Write-Log "$($enriched.Count) exclusion(s) ready for export." "OK"
@@ -661,9 +789,11 @@ try {
     Export-Data -Data $enriched -Base $baseName -Dir $script:cfg_OutputPath -Format $script:cfg_ExportFormat
 
     # -- Summary stats ---------------------------------------------------------
-    $disabled   = @($enriched | Where-Object { $true -eq $_.isDisabled }).Count
-    $noXml      = @($enriched | Where-Object { $false -eq $_.hasXml }).Count
+    $disabled   = @($enriched | Where-Object { $true  -eq $_.isDisabled }).Count
+    $noXml      = @($enriched | Where-Object { $false -eq $_.hasXml     }).Count
     $noRules    = @($enriched | Where-Object { $false -eq $_.linkedRules }).Count
+    $advanced   = @($enriched | Where-Object { $true  -eq $_.isAdvanced  }).Count
+    $internal   = @($enriched | Where-Object { [int]($_.isInternal) -gt 0 }).Count
 
     # -- Run log ---------------------------------------------------------------
     Save-RunLog -Dir $script:cfg_OutputPath -Base $baseName -Meta @{
@@ -676,6 +806,8 @@ try {
         totalFound      = $totalCount
         totalExported   = $enriched.Count
         disabledCount   = $disabled
+        advancedCount   = $advanced
+        internalCount   = $internal
         noXmlCount      = $noXml
         noRulesCount    = $noRules
         detailErrors    = $detailErrors
@@ -689,6 +821,8 @@ try {
     Write-Log " Export complete in ${duration}s"
     Write-Log " Total exported  : $($enriched.Count)"
     Write-Log " Disabled        : $disabled"
+    Write-Log " Advanced (XML)  : $advanced"
+    Write-Log " Internal (ESET) : $internal"
     Write-Log " No XML body     : $noXml"
     Write-Log " Not linked      : $noRules (not associated with any rule)"
     Write-Log "======================================================"
