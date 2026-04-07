@@ -587,6 +587,9 @@ try {
     }
     Write-Progress -Id 1 -Activity "Fetching exclusion list" -Completed
     Write-Log "List fetch complete: $($allExclusions.Count) exclusion(s)." "OK"
+    if ($allExclusions.Count -gt 0) {
+        Write-Log "LIST RAW PROPS: $($allExclusions[0].PSObject.Properties.Name -join ', ')" "DEBUG"
+    }
 
     if ($allExclusions.Count -eq 0) { Write-Log "No exclusions after filtering." "WARN"; exit 0 }
 
@@ -603,6 +606,14 @@ try {
                 -PercentComplete ([int]($fetched/$allExclusions.Count*100))
             try {
                 $detail = Invoke-ApiCall -Uri "$baseUrl/api/v1/exclusions/$exclId" -Headers $authHeaders
+                # One-time raw dump to identify response structure
+                if ($fetched -eq 1) {
+                    Write-Log "DETAIL RAW PROPS: $($detail.PSObject.Properties.Name -join ', ')" "DEBUG"
+                    foreach ($p in $detail.PSObject.Properties) {
+                        $v = if ($null -eq $p.Value) { "(null)" } elseif ($p.Value -is [System.Management.Automation.PSCustomObject]) { "PSObject{$($p.Value.PSObject.Properties.Name -join ',')}" } elseif ($p.Value -is [System.Object[]]) { "Array[$($p.Value.Count)]" } else { "$($p.Value)".Substring(0, [Math]::Min(80, "$($p.Value)".Length)) }
+                        Write-Log "  DETAIL: [$($p.Name)] = $v" "DEBUG"
+                    }
+                }
                 $enriched.Add((ConvertTo-FlatExclusion $excl $detail))
             } catch {
                 $detailErrors++
