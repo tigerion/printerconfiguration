@@ -607,6 +607,7 @@
     <div class="drop-hint">or click to browse &mdash; exported by Export-EsetInspectDetections.ps1</div>
   </div>
   <input type="file" id="fileInput" accept=".json">
+  <div id="statusMsg" style="font-size:13px;color:var(--muted);text-align:center;max-width:460px;line-height:1.6;display:none;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px 20px;"></div>
 </div>
 
 <!-- APP -->
@@ -697,52 +698,79 @@ dropBox.addEventListener('drop', e => {
 });
 fi.addEventListener('change', e => { if (e.target.files[0]) loadFile(e.target.files[0]); });
 
+function showStatus(msg, isError) {
+  const el = document.getElementById('statusMsg');
+  el.style.display = 'block';
+  el.style.color   = isError ? 'var(--red)' : 'var(--muted)';
+  el.style.borderColor = isError ? 'var(--red)' : 'var(--border)';
+  el.innerHTML = msg;
+}
+
 function loadFile(file) {
+  showStatus('Reading file: <strong>' + file.name + '</strong> (' + (file.size / 1024).toFixed(1) + ' KB)...', false);
+
   const reader = new FileReader();
+
+  reader.onerror = () => showStatus('FileReader error: could not read the file.', true);
+
   reader.onload = e => {
     try {
       const raw = e.target.result;
+      showStatus('File read OK (' + (raw.length / 1024).toFixed(1) + ' KB). Parsing JSON...', false);
 
-      // Parse JSON -- show a helpful message if it fails
+      // Parse JSON
       let parsed;
       try {
         parsed = JSON.parse(raw);
       } catch(parseErr) {
-        alert('JSON parse error: ' + parseErr.message +
-              '\n\nThe file may be truncated or contain invalid characters.' +
-              '\nFile size: ' + (raw.length / 1024).toFixed(1) + ' KB');
+        showStatus(
+          '<strong>JSON parse error</strong><br>' + parseErr.message +
+          '<br><br>File size: ' + (raw.length / 1024).toFixed(1) + ' KB' +
+          '<br>The file may be truncated or contain invalid characters.' +
+          '<br><br>First 200 chars of file:<br><code style="font-size:11px;word-break:break-all">' +
+          raw.substring(0, 200).replace(/</g,'&lt;').replace(/>/g,'&gt;') + '</code>',
+          true);
         return;
       }
 
-      // Unwrap all possible shapes PowerShell ConvertTo-Json can produce:
-      //   - Plain array:           [ {...}, {...} ]
-      //   - Wrapped object:        { "value": [ {...} ] }
-      //   - Single object:         { "id": 1, ... }
-      //   - Array-in-object:       { "detections": [ {...} ] }
+      showStatus('JSON parsed OK. Unwrapping structure...', false);
+
+      // Unwrap all possible shapes:
+      //   Plain array        [ {...}, {...} ]
+      //   Wrapped object     { "value": [...] }  or any key containing an array
+      //   Single object      { "id": 1, ... }
       let records = [];
       if (Array.isArray(parsed)) {
         records = parsed;
+        showStatus('Structure: plain array, ' + records.length + ' items.', false);
       } else if (parsed && typeof parsed === 'object') {
-        // Try common wrapper keys
-        const arrayKey = Object.keys(parsed).find(k => Array.isArray(parsed[k]));
+        const keys     = Object.keys(parsed);
+        const arrayKey = keys.find(k => Array.isArray(parsed[k]));
         if (arrayKey) {
           records = parsed[arrayKey];
+          showStatus('Structure: wrapped object, key "' + arrayKey + '", ' + records.length + ' items.', false);
         } else if (parsed.id !== undefined) {
-          // Single detection object
           records = [parsed];
+          showStatus('Structure: single detection object.', false);
         } else {
-          alert('Unrecognised JSON structure.\nExpected an array of detections.\n' +
-                'Top-level keys found: ' + Object.keys(parsed).join(', '));
+          showStatus(
+            '<strong>Unrecognised JSON structure.</strong><br>' +
+            'Expected an array of detections but got an object.<br>' +
+            'Top-level keys: <code>' + keys.join(', ') + '</code><br><br>' +
+            'Make sure you are loading the detections export, not the run log.',
+            true);
           return;
         }
       }
 
       if (records.length === 0) {
-        alert('The JSON file was parsed successfully but contains 0 detections.');
+        showStatus('<strong>File parsed OK but contains 0 detections.</strong><br>Check that the export ran successfully and contains data.', true);
         return;
       }
 
-      // Normalise each record -- skip any that cause errors rather than crashing
+      showStatus('Normalising ' + records.length + ' records...', false);
+
+      // Normalise each record individually -- one bad record does not crash the whole load
       const errors = [];
       allData = [];
       records.forEach((d, i) => {
@@ -754,21 +782,26 @@ function loadFile(file) {
       });
 
       if (allData.length === 0) {
-        alert('Loaded ' + records.length + ' records but all failed to normalise.\n' +
-              'First error: ' + (errors[0] || 'unknown'));
+        showStatus(
+          '<strong>All ' + records.length + ' records failed to normalise.</strong><br>' +
+          'First error: ' + (errors[0] || 'unknown') + '<br><br>' +
+          'Sample record keys: <code>' + Object.keys(records[0]||{}).join(', ') + '</code>',
+          true);
         return;
       }
 
       if (errors.length > 0) {
-        console.warn('Skipped ' + errors.length + ' records due to errors:', errors.slice(0,5));
+        console.warn('Skipped ' + errors.length + ' records:', errors.slice(0,5));
       }
 
+      showStatus('Loaded ' + allData.length + ' detections. Opening...', false);
       initApp();
 
     } catch(err) {
-      alert('Unexpected error loading file:\n' + err.message + '\n' + err.stack);
+      showStatus('<strong>Unexpected error:</strong><br>' + err.message + '<br><pre style="font-size:10px;white-space:pre-wrap">' + (err.stack||'') + '</pre>', true);
     }
   };
+
   reader.readAsText(file);
 }
 
