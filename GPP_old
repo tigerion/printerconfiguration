@@ -296,8 +296,8 @@ function Invoke-ApiCall {
     while ($true) {
         $attempt++
         try {
+            # Build a fresh splat on every attempt -- never reuse/mutate between retries
             $splat = New-ApiSplat -Uri $Uri -Method $Method -Headers $Headers -Body $Body
-            Write-Log "API CALL: $Method $Uri  |  splat keys: $($splat.Keys -join ', ')  |  has Body: $($splat.ContainsKey('Body'))  |  has ContentType: $($splat.ContainsKey('ContentType'))" "DEBUG"
             return Invoke-RestMethod @splat
         } catch [System.Net.WebException] {
             $response = $_.Exception.Response
@@ -375,20 +375,38 @@ function Test-TokenAge {
 
 #region -- Exclusion helpers --------------------------------------------------
 
+function Resolve-ExclusionObject {
+    # The detail endpoint wraps the exclusion inside an "EXCLUSION" property:
+    # { "EXCLUSION": { body, enabled, id, name, note, ruleIds, ruleUuids, ... } }
+    # Unwrap it so ConvertTo-FlatExclusion always receives a flat object.
+    param([PSCustomObject]$Raw)
+    if ($null -eq $Raw) { return $null }
+    $wrapper = $Raw.PSObject.Properties['EXCLUSION']
+    if ($null -ne $wrapper -and $null -ne $wrapper.Value) {
+        return $wrapper.Value   # detail endpoint -- unwrap
+    }
+    return $Raw                 # list endpoint -- already flat
+}
+
 function ConvertTo-FlatExclusion {
-    param([PSCustomObject]$E, [PSCustomObject]$Detail = $null)
+    param([PSCustomObject]$E, [PSCustomObject]$RawDetail = $null)
 
-    # Pull from detail if available, fall back to list object
-    $src = if ($null -ne $Detail) { $Detail } else { $E }
+    # Unwrap EXCLUSION wrapper from detail response if present
+    $detail = if ($null -ne $RawDetail) { Resolve-ExclusionObject $RawDetail } else { $null }
 
-    # ruleIds and ruleUuids come as arrays -- join for CSV friendliness
-    $ruleIds   = try { $ids = Get-Prop $src 'ruleIds';   if ($ids)   { @($ids)   -join ', ' } else { "" } } catch { "" }
-    $ruleUuids = try { $ids = Get-Prop $src 'ruleUuids'; if ($ids)   { @($ids)   -join ', ' } else { "" } } catch { "" }
+    # Pull from unwrapped detail if available, fall back to list object
+    $src = if ($null -ne $detail) { $detail } else { $E }
 
-    # XML body -- from detail only
+    # ruleIds, ruleUuids, targetIds, targetUuids come as arrays -- join for CSV friendliness
+    $ruleIds    = try { $ids = Get-Prop $src 'ruleIds';    if ($ids) { @($ids) -join ', ' } else { "" } } catch { "" }
+    $ruleUuids  = try { $ids = Get-Prop $src 'ruleUuids';  if ($ids) { @($ids) -join ', ' } else { "" } } catch { "" }
+    $targetIds  = try { $ids = Get-Prop $src 'targetIds';  if ($ids) { @($ids) -join ', ' } else { "" } } catch { "" }
+    $targetUuids = try { $ids = Get-Prop $src 'targetUuids'; if ($ids) { @($ids) -join ', ' } else { "" } } catch { "" }
+
+    # XML body -- from detail only (inside the unwrapped object)
     $xmlBody = ""
-    if ($null -ne $Detail) {
-        $bodyProp = $Detail.PSObject.Properties['body']
+    if ($null -ne $detail) {
+        $bodyProp = $detail.PSObject.Properties['body']
         if ($null -ne $bodyProp -and $null -ne $bodyProp.Value) {
             $xmlBody = "$($bodyProp.Value)".Trim()
         }
@@ -405,6 +423,8 @@ function ConvertTo-FlatExclusion {
         ruleCount   = if ($ruleIds -ne "") { ($ruleIds -split ',').Count } else { 0 }
         xmlBody     = $xmlBody
         # Derived fields useful for review
+        targetIds   = $targetIds
+        targetUuids = $targetUuids
         hasXml      = ($xmlBody -ne "")
         isDisabled  = (-not [bool](Get-Prop $E 'enabled' $false))
         linkedRules = if ($ruleIds -ne "") { $true } else { $false }
@@ -471,10 +491,12 @@ function Export-Data {
                 ruleIds     = $_.ruleIds
                 ruleUuids   = $_.ruleUuids
                 ruleCount   = $_.ruleCount
-                linkedRules = $_.linkedRules
-                hasXml      = $_.hasXml
-                xmlType     = $xmlType
-                xmlSummary  = $xmlSum
+                linkedRules  = $_.linkedRules
+                targetIds    = $_.targetIds
+                targetUuids  = $_.targetUuids
+                hasXml       = $_.hasXml
+                xmlType      = $xmlType
+                xmlSummary   = $xmlSum
             }
         }
         $path = Get-SafeOutputPath -Dir $Dir -Base $Base -Ext "csv"
@@ -587,9 +609,7 @@ try {
     }
     Write-Progress -Id 1 -Activity "Fetching exclusion list" -Completed
     Write-Log "List fetch complete: $($allExclusions.Count) exclusion(s)." "OK"
-    if ($allExclusions.Count -gt 0) {
-        Write-Log "LIST RAW PROPS: $($allExclusions[0].PSObject.Properties.Name -join ', ')" "DEBUG"
-    }
+
 
     if ($allExclusions.Count -eq 0) { Write-Log "No exclusions after filtering." "WARN"; exit 0 }
 
@@ -606,14 +626,7 @@ try {
                 -PercentComplete ([int]($fetched/$allExclusions.Count*100))
             try {
                 $detail = Invoke-ApiCall -Uri "$baseUrl/api/v1/exclusions/$exclId" -Headers $authHeaders
-                # One-time raw dump to identify response structure
-                if ($fetched -eq 1) {
-                    Write-Log "DETAIL RAW PROPS: $($detail.PSObject.Properties.Name -join ', ')" "DEBUG"
-                    foreach ($p in $detail.PSObject.Properties) {
-                        $v = if ($null -eq $p.Value) { "(null)" } elseif ($p.Value -is [System.Management.Automation.PSCustomObject]) { "PSObject{$($p.Value.PSObject.Properties.Name -join ',')}" } elseif ($p.Value -is [System.Object[]]) { "Array[$($p.Value.Count)]" } else { "$($p.Value)".Substring(0, [Math]::Min(80, "$($p.Value)".Length)) }
-                        Write-Log "  DETAIL: [$($p.Name)] = $v" "DEBUG"
-                    }
-                }
+
                 $enriched.Add((ConvertTo-FlatExclusion $excl $detail))
             } catch {
                 $detailErrors++
