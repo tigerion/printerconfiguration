@@ -701,11 +701,73 @@ function loadFile(file) {
   const reader = new FileReader();
   reader.onload = e => {
     try {
-      let parsed = JSON.parse(e.target.result);
-      if (!Array.isArray(parsed)) parsed = parsed.value || [parsed];
-      allData = parsed.map(normalise);
+      const raw = e.target.result;
+
+      // Parse JSON -- show a helpful message if it fails
+      let parsed;
+      try {
+        parsed = JSON.parse(raw);
+      } catch(parseErr) {
+        alert('JSON parse error: ' + parseErr.message +
+              '\n\nThe file may be truncated or contain invalid characters.' +
+              '\nFile size: ' + (raw.length / 1024).toFixed(1) + ' KB');
+        return;
+      }
+
+      // Unwrap all possible shapes PowerShell ConvertTo-Json can produce:
+      //   - Plain array:           [ {...}, {...} ]
+      //   - Wrapped object:        { "value": [ {...} ] }
+      //   - Single object:         { "id": 1, ... }
+      //   - Array-in-object:       { "detections": [ {...} ] }
+      let records = [];
+      if (Array.isArray(parsed)) {
+        records = parsed;
+      } else if (parsed && typeof parsed === 'object') {
+        // Try common wrapper keys
+        const arrayKey = Object.keys(parsed).find(k => Array.isArray(parsed[k]));
+        if (arrayKey) {
+          records = parsed[arrayKey];
+        } else if (parsed.id !== undefined) {
+          // Single detection object
+          records = [parsed];
+        } else {
+          alert('Unrecognised JSON structure.\nExpected an array of detections.\n' +
+                'Top-level keys found: ' + Object.keys(parsed).join(', '));
+          return;
+        }
+      }
+
+      if (records.length === 0) {
+        alert('The JSON file was parsed successfully but contains 0 detections.');
+        return;
+      }
+
+      // Normalise each record -- skip any that cause errors rather than crashing
+      const errors = [];
+      allData = [];
+      records.forEach((d, i) => {
+        try {
+          allData.push(normalise(d));
+        } catch(normErr) {
+          errors.push('Record ' + i + ': ' + normErr.message);
+        }
+      });
+
+      if (allData.length === 0) {
+        alert('Loaded ' + records.length + ' records but all failed to normalise.\n' +
+              'First error: ' + (errors[0] || 'unknown'));
+        return;
+      }
+
+      if (errors.length > 0) {
+        console.warn('Skipped ' + errors.length + ' records due to errors:', errors.slice(0,5));
+      }
+
       initApp();
-    } catch(err) { alert('Failed to parse JSON:\n' + err.message); }
+
+    } catch(err) {
+      alert('Unexpected error loading file:\n' + err.message + '\n' + err.stack);
+    }
   };
   reader.readAsText(file);
 }
@@ -713,14 +775,25 @@ function loadFile(file) {
 function normalise(d) {
   const bool = v => v === true || v === 'True' || v === 'true';
   const sev  = (d.severityLabel || scoreToSev(+d.severityScore || 0)).toLowerCase();
+
+  // commentsArray may be a real array, a JSON string, or null
+  let commentsArray = d.commentsArray;
+  if (typeof commentsArray === 'string') {
+    try { commentsArray = JSON.parse(commentsArray); } catch(e) { commentsArray = []; }
+  }
+  if (!Array.isArray(commentsArray)) commentsArray = [];
+
+  const noteStr     = d.note != null ? String(d.note) : '';
+  const commentsTxt = d.commentsText != null ? String(d.commentsText) : '';
+
   return { ...d,
+    commentsArray,
     resolved:     bool(d.resolved),
     handled:      bool(d.handled),
     autoResolved: bool(d.autoResolved),
     _sev:         sev,
-    _hasNote:     !!(d.note && String(d.note).trim()),
-    _hasComments: !!(d.commentsText && String(d.commentsText).trim()) ||
-                  (Array.isArray(d.commentsArray) && d.commentsArray.length > 0),
+    _hasNote:     !!(noteStr.trim()),
+    _hasComments: !!(commentsTxt.trim()) || commentsArray.length > 0,
   };
 }
 
