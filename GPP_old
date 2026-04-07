@@ -277,8 +277,13 @@ function Assert-OutputWritable {
 
 function New-ApiSplat {
     param([string]$Uri, [string]$Method = "GET", [hashtable]$Headers = @{}, [object]$Body = $null)
-    $s = @{ Uri = $Uri; Method = $Method; Headers = $Headers; ContentType = "application/json"; UseBasicParsing = $true }
-    if ($null -ne $Body) { $s["Body"] = ($Body | ConvertTo-Json -Depth 10 -Compress) }
+    $s = @{ Uri = $Uri; Method = $Method; Headers = $Headers; UseBasicParsing = $true }
+    # Only set ContentType and Body when there is actually a body to send.
+    # Sending ContentType on a GET with no body causes "Cannot send content-body with this verb".
+    if ($null -ne $Body) {
+        $s["ContentType"] = "application/json"
+        $s["Body"]        = ($Body | ConvertTo-Json -Depth 10 -Compress)
+    }
     if ($script:cfg_SkipCertificateCheck -and $PSVersionTable.PSVersion.Major -ge 6) {
         $s["SkipCertificateCheck"] = $true
     }
@@ -429,15 +434,50 @@ function Save-RunLog {
 function Export-Data {
     param([System.Collections.Generic.List[object]]$Data, [string]$Base, [string]$Dir, [string]$Format)
     if ($Data.Count -eq 0) { return }
-    if ($Format -in @("CSV","Both")) {
-        $path = Get-SafeOutputPath -Dir $Dir -Base $Base -Ext "csv"
-        $Data | Export-Csv -Path $path -NoTypeInformation -Encoding UTF8
-        Write-Log "CSV -> $path" "OK"
-    }
+
+    # JSON -- always exported when Format is JSON or Both.
+    # Includes full xmlBody for use with the HTML reviewer.
     if ($Format -in @("JSON","Both")) {
         $path = Get-SafeOutputPath -Dir $Dir -Base $Base -Ext "json"
         $Data | ConvertTo-Json -Depth 10 | Out-File -FilePath $path -Encoding UTF8
         Write-Log "JSON -> $path" "OK"
+    }
+
+    # CSV -- always exported when Format is CSV or Both.
+    # xmlBody is excluded (multi-line XML breaks Excel cells) and replaced with:
+    #   xmlType    -- the root element name from the XML (e.g. "ExclusionQuery", "RuleExclusion")
+    #   xmlSummary -- first 120 chars of the XML, single-line, for a quick glance
+    if ($Format -in @("CSV","Both")) {
+        $csvData = $Data | ForEach-Object {
+            $xml     = if ($_.PSObject.Properties['xmlBody']) { "$($_.xmlBody)".Trim() } else { "" }
+            $xmlType = ""
+            $xmlSum  = ""
+            if ($xml -ne "") {
+                # Extract root element name e.g. <ExclusionQuery ...> -> ExclusionQuery
+                if ($xml -match '<([A-Za-z][A-Za-z0-9_]*)[\s>]') { $xmlType = $Matches[1] }
+                # Collapse whitespace for a readable single-line summary
+                $xmlSum = ($xml -replace '\s+', ' ').Trim()
+                if ($xmlSum.Length -gt 120) { $xmlSum = $xmlSum.Substring(0, 120) + "..." }
+            }
+            [PSCustomObject]@{
+                id          = $_.id
+                uuid        = $_.uuid
+                name        = $_.name
+                enabled     = $_.enabled
+                isDisabled  = $_.isDisabled
+                note        = $_.note
+                ruleIds     = $_.ruleIds
+                ruleUuids   = $_.ruleUuids
+                ruleCount   = $_.ruleCount
+                linkedRules = $_.linkedRules
+                hasXml      = $_.hasXml
+                xmlType     = $xmlType
+                xmlSummary  = $xmlSum
+            }
+        }
+        $path = Get-SafeOutputPath -Dir $Dir -Base $Base -Ext "csv"
+        $csvData | Export-Csv -Path $path -NoTypeInformation -Encoding UTF8
+        Write-Log "CSV -> $path  (xmlBody excluded; use JSON for full XML criteria)" "OK"
     }
 }
 
