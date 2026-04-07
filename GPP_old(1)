@@ -1042,9 +1042,9 @@ function renderDetail(i) {
 
   document.getElementById('detailPanel').innerHTML = `
     <div class="detail-nav">
-      <button class="nav-btn" onclick="navigate(-1)" ${i===0?'disabled':'')}>&larr; Prev</button>
+      <button class="nav-btn" onclick="navigate(-1)" ${i===0?'disabled':''}>&larr; Prev</button>
       <span class="nav-counter">${i+1} / ${filtered.length}</span>
-      <button class="nav-btn" onclick="navigate(1)" ${i===filtered.length-1?'disabled':''}}>Next &rarr;</button>
+      <button class="nav-btn" onclick="navigate(1)" ${i===filtered.length-1?'disabled':''}>Next &rarr;</button>
       <div style="flex:1"></div>
       <button class="flag-btn${isFlagged?' flagged':''}" onclick="toggleFlag('${d.id}')">
         &#9873; ${isFlagged ? 'Unflag' : 'Flag for review'}
