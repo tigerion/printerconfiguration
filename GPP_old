@@ -403,8 +403,9 @@ function Get-FrontendExclusions {
     param([string]$BaseUrl, [hashtable]$Headers)
 
     $allEntities = [System.Collections.Generic.List[object]]::new()
-    $pageToken   = ""
+    $pageSize    = 100
     $pageNum     = 0
+    $totalCount  = $null
 
     $requiredFields = @(
         "id","enabled","ruleStatus","accessGroupId","accessGroupPath","isInternal",
@@ -413,25 +414,31 @@ function Get-FrontendExclusions {
         "accessGroup","ruleName","rulesCount","hitCount","note","targets","uuid"
     )
 
+    # Build filter tree once -- always exclude deleted; optionally filter by date
+    $andClauses = [System.Collections.Generic.List[object]]::new()
+    $andClauses.Add(@{ deleted = @{ EQ = 0 } })
+    if ($script:cfg_DaysBack -gt 0) {
+        $since = (Get-Date).ToUniversalTime().AddDays(-$script:cfg_DaysBack).ToString("yyyy-MM-ddTHH:mm:ssZ")
+        $andClauses.Add(@{ timestamp = @{ GE = $since } })
+        Write-Log "  Applying DaysBack=$($script:cfg_DaysBack) filter: timestamp >= $since"
+    }
+    $filterTree = @{ AND = $andClauses.ToArray() }
+
     do {
         $pageNum++
-        # Build filter tree -- always exclude deleted; optionally filter by date
-        $andClauses = [System.Collections.Generic.List[object]]::new()
-        $andClauses.Add(@{ deleted = @{ EQ = 0 } })
 
-        if ($script:cfg_DaysBack -gt 0) {
-            $since = (Get-Date).ToUniversalTime().AddDays(-$script:cfg_DaysBack).ToString("yyyy-MM-ddTHH:mm:ssZ")
-            $andClauses.Add(@{ timestamp = @{ GE = $since } })
-            Write-Log "  Applying DaysBack=$($script:cfg_DaysBack) filter: timestamp >= $since"
-        }
+        # Use numeric offset pagination -- more reliable than pageToken
+        # The URL suffix is the 0-based offset: /frontend/exclusions/0, /frontend/exclusions/100, etc.
+        $offset = ($pageNum - 1) * $pageSize
+        $url    = "$BaseUrl/frontend/exclusions/$offset"
 
         $body = @{
-            pageSize     = 100
-            forceRefresh = $false
+            pageSize     = $pageSize
+            forceRefresh = ($pageNum -eq 1)   # force refresh only on first page
             groupId      = 1
-            pageToken    = $pageToken
+            pageToken    = ""
             localFilters = @{
-                filterTree = @{ AND = $andClauses.ToArray() }
+                filterTree = $filterTree
                 subgroups  = $false
             }
             sortOrders     = @( @{ column = "timestamp"; ascend = $false } )
@@ -439,8 +446,17 @@ function Get-FrontendExclusions {
             sessionId      = [guid]::NewGuid().ToString()
         }
 
-        Write-Log "  Frontend page $pageNum (token='$pageToken')..."
-        $resp = Invoke-ApiCall -Uri "$BaseUrl/frontend/exclusions/0" -Method "POST" -Headers $Headers -Body $body
+        Write-Log "  Frontend page $pageNum (offset=$offset)..."
+        $resp = Invoke-ApiCall -Uri $url -Method "POST" -Headers $Headers -Body $body
+
+        # Capture totalCount from first response
+        if ($null -eq $totalCount) {
+            $tcProp = $resp.PSObject.Properties['totalCount']
+            if ($null -ne $tcProp -and $null -ne $tcProp.Value) {
+                $totalCount = [int]$tcProp.Value
+                Write-Log "  Total exclusions reported by server: $totalCount"
+            }
+        }
 
         $entProp = $resp.PSObject.Properties['entities']
         if ($null -eq $entProp -or $null -eq $entProp.Value) {
@@ -449,22 +465,30 @@ function Get-FrontendExclusions {
         }
 
         $batch = @($entProp.Value)
+        if ($batch.Count -eq 0) { break }
+
         $allEntities.AddRange([object[]]$batch)
 
-        # Get next page token
-        $tokenProp = $resp.PSObject.Properties['pageToken']
-        $pageToken = if ($null -ne $tokenProp -and $null -ne $tokenProp.Value) { "$($tokenProp.Value)" } else { "" }
+        Write-Log "  Page $pageNum : $($batch.Count) entities collected (running total: $($allEntities.Count)$(if ($totalCount) { " / $totalCount" }))" "OK"
 
-        # Stop if we got fewer than pageSize (last page) or no token
-        $totalProp = $resp.PSObject.Properties['totalCount']
-        $total     = if ($null -ne $totalProp) { [int]$totalProp.Value } else { 0 }
+        Write-Progress -Id 1 -Activity "Fetching frontend exclusions" `
+            -Status "Page $pageNum | $($allEntities.Count) collected$(if ($totalCount) { " of $totalCount" })" `
+            -PercentComplete $(if ($totalCount -and $totalCount -gt 0) { [int]([Math]::Min(99, $allEntities.Count / $totalCount * 100)) } else { 0 })
 
-        Write-Log "  Page $pageNum : $($batch.Count) entities (total: $($allEntities.Count) / $total)" "OK"
-
-        if ($batch.Count -lt 100 -or $pageToken -eq "") { break }
+        # Stop conditions:
+        #   1. Got fewer than a full page -- we are on the last page
+        #   2. We have collected >= totalCount (server-reported total)
+        #   3. Safety cap at 10000 to prevent infinite loops
+        if ($batch.Count -lt $pageSize) { break }
+        if ($null -ne $totalCount -and $allEntities.Count -ge $totalCount) { break }
+        if ($allEntities.Count -ge 10000) {
+            Write-Log "  Safety cap reached (10000). Stopping." "WARN"
+            break
+        }
 
     } while ($true)
 
+    Write-Progress -Id 1 -Activity "Fetching frontend exclusions" -Completed
     Write-Log "Frontend fetch complete: $($allEntities.Count) entities." "OK"
     return $allEntities
 }
