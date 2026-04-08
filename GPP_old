@@ -446,15 +446,31 @@ function Get-FrontendExclusions {
             sessionId      = [guid]::NewGuid().ToString()
         }
 
-        Write-Log "  Frontend page $pageNum (offset=$offset)..."
-        $resp = Invoke-ApiCall -Uri $url -Method "POST" -Headers $Headers -Body $body
+        Write-Log "  Frontend page $pageNum (offset=$offset) URL=$url..."
+        $resp = $null
+        try {
+            $resp = Invoke-ApiCall -Uri $url -Method "POST" -Headers $Headers -Body $body
+        } catch {
+            Write-Log "  DIAG Invoke-ApiCall threw: $_" "DEBUG"
+        }
 
-        # Diagnostic: dump all top-level response fields on first page
+        # Diagnostic: dump raw response on first page regardless of type
         if ($pageNum -eq 1) {
-            Write-Log "  DIAG response fields: $($resp.PSObject.Properties.Name -join ', ')" "DEBUG"
-            foreach ($p in $resp.PSObject.Properties) {
-                if ($p.Name -ne 'entities') {
-                    Write-Log "  DIAG [$($p.Name)] = $($p.Value)" "DEBUG"
+            if ($null -eq $resp) {
+                Write-Log "  DIAG resp is NULL" "DEBUG"
+            } else {
+                Write-Log "  DIAG resp type: $($resp.GetType().FullName)" "DEBUG"
+                if ($resp -is [string]) {
+                    Write-Log "  DIAG resp string (first 500 chars): $($resp.Substring(0, [Math]::Min(500, $resp.Length)))" "DEBUG"
+                } elseif ($resp -is [System.Management.Automation.PSCustomObject]) {
+                    Write-Log "  DIAG resp PSObject fields: $($resp.PSObject.Properties.Name -join ', ')" "DEBUG"
+                    foreach ($p in $resp.PSObject.Properties) {
+                        if ($p.Name -ne 'entities') {
+                            Write-Log "  DIAG [$($p.Name)] = $($p.Value)" "DEBUG"
+                        }
+                    }
+                } else {
+                    Write-Log "  DIAG resp (ConvertTo-Json): $($resp | ConvertTo-Json -Depth 2 -Compress)" "DEBUG"
                 }
             }
         }
