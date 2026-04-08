@@ -481,12 +481,14 @@ function Get-FrontendExclusions {
 
         $allEntities.AddRange([object[]]$batch)
 
-        $firstId = try { Get-Prop $batch[0] 'id' '?' } catch { '?' }
-        Write-Log "  Page $pageNum : +$($batch.Count) entities, first id=$firstId (total so far: $($allEntities.Count)$(if ($totalCount) { \" / $totalCount\" }))" "OK"
+        $firstId    = try { Get-Prop $batch[0] 'id' '?' } catch { '?' }
+        $totalSuffix = if ($null -ne $totalCount) { " / $totalCount" } else { "" }
+        $pct         = if ($null -ne $totalCount -and $totalCount -gt 0) { [int]([Math]::Min(99, $allEntities.Count / $totalCount * 100)) } else { 0 }
+        Write-Log "  Page $pageNum : +$($batch.Count) entities, first id=$firstId (total so far: $($allEntities.Count)$totalSuffix)" "OK"
 
         Write-Progress -Id 1 -Activity "Fetching frontend exclusions" `
-            -Status "Page $pageNum | $($allEntities.Count) collected$(if ($totalCount) { " of $totalCount" })" `
-            -PercentComplete $(if ($totalCount -and $totalCount -gt 0) { [int]([Math]::Min(99, $allEntities.Count / $totalCount * 100)) } else { 0 })
+            -Status "Page $pageNum | $($allEntities.Count) collected$totalSuffix" `
+            -PercentComplete $pct
 
         # Stop when we have collected all records the server reported
         if ($null -ne $totalCount -and $allEntities.Count -ge $totalCount) {
