@@ -449,6 +449,16 @@ function Get-FrontendExclusions {
         Write-Log "  Frontend page $pageNum (offset=$offset)..."
         $resp = Invoke-ApiCall -Uri $url -Method "POST" -Headers $Headers -Body $body
 
+        # Diagnostic: dump all top-level response fields on first page
+        if ($pageNum -eq 1) {
+            Write-Log "  DIAG response fields: $($resp.PSObject.Properties.Name -join ', ')" "DEBUG"
+            foreach ($p in $resp.PSObject.Properties) {
+                if ($p.Name -ne 'entities') {
+                    Write-Log "  DIAG [$($p.Name)] = $($p.Value)" "DEBUG"
+                }
+            }
+        }
+
         # Capture totalCount from first response
         if ($null -eq $totalCount) {
             $tcProp = $resp.PSObject.Properties['totalCount']
