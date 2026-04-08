@@ -38,6 +38,11 @@
 .PARAMETER ExportFormat
     CSV, JSON, or Both. Default: Both
 
+.PARAMETER DaysBack
+    Export only exclusions created within the last N days.
+    Example: -DaysBack 30  exports exclusions created in the last 30 days.
+    Default: 0 (all exclusions regardless of age).
+
 .PARAMETER IncludeDisabled
     When $true (default), exports all exclusions including disabled ones.
     Set to $false to export only enabled exclusions.
@@ -84,8 +89,10 @@ param(
     [Parameter(Mandatory = $false)]
     [ValidateSet("CSV","JSON","Both","")]
     [string]$ExportFormat = "",
+    [Parameter(Mandatory = $false)] [int]   $DaysBack              = -1,
     [Parameter(Mandatory = $false)] [object]$IncludeDisabled      = $null,
     [Parameter(Mandatory = $false)] [object]$FetchDetails          = $null,
+    [Parameter(Mandatory = $false)] [switch]$SaveConfig,
     [Parameter(Mandatory = $false)] [int]   $DetailDelayMs         = -1,
     [Parameter(Mandatory = $false)] [int]   $MaxRetries            = -1,
     [Parameter(Mandatory = $false)] [object]$SkipCertificateCheck  = $null
@@ -180,7 +187,7 @@ function Read-Config {
 
     $cfg = @{}
     foreach ($key in @("Server","Username","Domain","OutputPath","ExportFormat",
-                        "DetailDelayMs","MaxRetries","SkipCertificateCheck")) {
+                        "DaysBack","DetailDelayMs","MaxRetries","SkipCertificateCheck","IncludeDisabled","FetchDetails")) {
         $prop = $raw.PSObject.Properties[$key]
         if ($null -ne $prop -and $null -ne $prop.Value -and "$($prop.Value)" -ne "") {
             $cfg[$key] = $prop.Value
@@ -222,6 +229,7 @@ function Merge-Config {
     $script:cfg_Domain               = Resolve-Bool $Domain              "Domain"               $false
     $script:cfg_OutputPath           = Resolve-Str  $OutputPath          "OutputPath"           (Get-Location).Path
     $script:cfg_ExportFormat         = Resolve-Str  $ExportFormat        "ExportFormat"         "Both"
+    $script:cfg_DaysBack             = Resolve-Int  $DaysBack             "DaysBack"             0
     $script:cfg_IncludeDisabled      = Resolve-Bool $IncludeDisabled     "IncludeDisabled"      $true
     $script:cfg_FetchDetails         = Resolve-Bool $FetchDetails        "FetchDetails"         $true
     $script:cfg_DetailDelayMs        = Resolve-Int  $DetailDelayMs       "DetailDelayMs"        50
@@ -667,6 +675,7 @@ try {
 
     Write-Log "Server          : $($script:cfg_Server)"
     Write-Log "Username        : $($script:cfg_Username)"
+    Write-Log "DaysBack        : $(if ($script:cfg_DaysBack -gt 0) { $script:cfg_DaysBack } else { '(all)' })"
     Write-Log "IncludeDisabled : $($script:cfg_IncludeDisabled)"
     Write-Log "FetchDetails    : $($script:cfg_FetchDetails)"
     Write-Log "ExportFormat    : $($script:cfg_ExportFormat)"
@@ -784,6 +793,64 @@ try {
     }
 
     Write-Log "$($enriched.Count) exclusion(s) ready for export." "OK"
+
+
+
+    # -- Save config (if requested) ------------------------------------------
+
+    if ($SaveConfig) {
+
+        Write-Log "Saving current settings to config file (-SaveConfig)..."
+
+        $path = Join-Path $PSScriptRoot "eset-config.json"
+
+        $cfg = [ordered]@{}
+
+        if (Test-Path $path) {
+
+            try {
+
+                $existing = Get-Content $path -Raw | ConvertFrom-Json
+
+                foreach ($prop in $existing.PSObject.Properties) { $cfg[$prop.Name] = $prop.Value }
+
+            } catch { Write-Log "Could not read existing config for merge: $_" "WARN" }
+
+        }
+
+        $cfg["_savedAt"]          = (Get-Date).ToString("o")
+
+        $cfg["Server"]            = $script:cfg_Server
+
+        $cfg["Username"]          = $script:cfg_Username
+
+        $cfg["Domain"]            = $script:cfg_Domain
+
+        $cfg["OutputPath"]        = $script:cfg_OutputPath
+
+        $cfg["ExportFormat"]      = $script:cfg_ExportFormat
+
+        $cfg["DaysBack"]          = $script:cfg_DaysBack
+
+        $cfg["IncludeDisabled"]   = $script:cfg_IncludeDisabled
+
+        $cfg["FetchDetails"]      = $script:cfg_FetchDetails
+
+        $cfg["DetailDelayMs"]     = $script:cfg_DetailDelayMs
+
+        $cfg["MaxRetries"]        = $script:cfg_MaxRetries
+
+        $cfg["SkipCertificateCheck"] = $script:cfg_SkipCertificateCheck
+
+        try {
+
+            $cfg | ConvertTo-Json -Depth 5 | Out-File -FilePath $path -Encoding UTF8
+
+            Write-Log "Settings saved to config: $path" "OK"
+
+        } catch { Write-Log "Failed to write config: $_" "WARN" }
+
+    }
 
     # -- Export ----------------------------------------------------------------
     Export-Data -Data $enriched -Base $baseName -Dir $script:cfg_OutputPath -Format $script:cfg_ExportFormat
