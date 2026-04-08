@@ -447,68 +447,60 @@ function Get-FrontendExclusions {
         }
 
         Write-Log "  Frontend page $pageNum (offset=$offset) URL=$url..."
-        $resp = $null
-        try {
-            $resp = Invoke-ApiCall -Uri $url -Method "POST" -Headers $Headers -Body $body
-        } catch {
-            Write-Log "  DIAG Invoke-ApiCall threw: $_" "DEBUG"
-        }
+        $resp = Invoke-ApiCall -Uri $url -Method "POST" -Headers $Headers -Body $body
 
-        # Diagnostic: dump raw response on first page regardless of type
-        if ($pageNum -eq 1) {
-            if ($null -eq $resp) {
-                Write-Log "  DIAG resp is NULL" "DEBUG"
-            } else {
-                Write-Log "  DIAG resp type: $($resp.GetType().FullName)" "DEBUG"
-                if ($resp -is [string]) {
-                    Write-Log "  DIAG resp string (first 500 chars): $($resp.Substring(0, [Math]::Min(500, $resp.Length)))" "DEBUG"
-                } elseif ($resp -is [System.Management.Automation.PSCustomObject]) {
-                    Write-Log "  DIAG resp PSObject fields: $($resp.PSObject.Properties.Name -join ', ')" "DEBUG"
-                    foreach ($p in $resp.PSObject.Properties) {
-                        if ($p.Name -ne 'entities') {
-                            Write-Log "  DIAG [$($p.Name)] = $($p.Value)" "DEBUG"
-                        }
-                    }
-                } else {
-                    Write-Log "  DIAG resp (ConvertTo-Json): $($resp | ConvertTo-Json -Depth 2 -Compress)" "DEBUG"
+        # Capture totalCount from first response -- handle case-insensitive field names
+        if ($null -eq $totalCount) {
+            foreach ($tcName in @('totalCount','totalcount','TotalCount')) {
+                $tcProp = $resp.PSObject.Properties[$tcName]
+                if ($null -ne $tcProp -and $null -ne $tcProp.Value) {
+                    $totalCount = [int]$tcProp.Value
+                    Write-Log "  Server reports $totalCount total exclusions."
+                    break
                 }
             }
         }
 
-        # Capture totalCount from first response
-        if ($null -eq $totalCount) {
-            $tcProp = $resp.PSObject.Properties['totalCount']
-            if ($null -ne $tcProp -and $null -ne $tcProp.Value) {
-                $totalCount = [int]$tcProp.Value
-                Write-Log "  Total exclusions reported by server: $totalCount"
-            }
+        # Get entities -- handle case-insensitive field name
+        $entProp = $null
+        foreach ($eName in @('entities','Entities')) {
+            $entProp = $resp.PSObject.Properties[$eName]
+            if ($null -ne $entProp -and $null -ne $entProp.Value) { break }
         }
 
-        $entProp = $resp.PSObject.Properties['entities']
         if ($null -eq $entProp -or $null -eq $entProp.Value) {
-            Write-Log "  No entities in frontend response -- stopping pagination." "WARN"
+            Write-Log "  No entities in frontend response -- stopping." "WARN"
             break
         }
 
         $batch = @($entProp.Value)
-        if ($batch.Count -eq 0) { break }
+        if ($batch.Count -eq 0) {
+            Write-Log "  Empty batch returned -- pagination complete." "OK"
+            break
+        }
 
         $allEntities.AddRange([object[]]$batch)
 
-        Write-Log "  Page $pageNum : $($batch.Count) entities collected (running total: $($allEntities.Count)$(if ($totalCount) { " / $totalCount" }))" "OK"
+        $firstId = try { Get-Prop $batch[0] 'id' '?' } catch { '?' }
+        Write-Log "  Page $pageNum : +$($batch.Count) entities, first id=$firstId (total so far: $($allEntities.Count)$(if ($totalCount) { \" / $totalCount\" }))" "OK"
 
         Write-Progress -Id 1 -Activity "Fetching frontend exclusions" `
             -Status "Page $pageNum | $($allEntities.Count) collected$(if ($totalCount) { " of $totalCount" })" `
             -PercentComplete $(if ($totalCount -and $totalCount -gt 0) { [int]([Math]::Min(99, $allEntities.Count / $totalCount * 100)) } else { 0 })
 
-        # Stop conditions:
-        #   1. Got fewer than a full page -- we are on the last page
-        #   2. We have collected >= totalCount (server-reported total)
-        #   3. Safety cap at 10000 to prevent infinite loops
-        if ($batch.Count -lt $pageSize) { break }
-        if ($null -ne $totalCount -and $allEntities.Count -ge $totalCount) { break }
+        # Stop when we have collected all records the server reported
+        if ($null -ne $totalCount -and $allEntities.Count -ge $totalCount) {
+            Write-Log "  All $totalCount records collected." "OK"
+            break
+        }
+        # Also stop if batch was smaller than a full page (last page)
+        if ($batch.Count -lt $pageSize) {
+            Write-Log "  Partial page ($($batch.Count) < $pageSize) -- last page reached." "OK"
+            break
+        }
+        # Safety cap
         if ($allEntities.Count -ge 10000) {
-            Write-Log "  Safety cap reached (10000). Stopping." "WARN"
+            Write-Log "  Safety cap (10000) reached -- stopping." "WARN"
             break
         }
 
