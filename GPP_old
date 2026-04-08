@@ -398,14 +398,12 @@ function Get-FrontendExclusions {
     Fetch all exclusions from POST /frontend/exclusions/0 which returns rich metadata
     including author, isAdvanced, targets, hitCount, ruleName, timestamp, and criteria
     counts -- fields not available in the documented REST API.
-    Uses pageToken-based pagination to retrieve all records.
+
+    Strategy: get the total count first from the documented GET endpoint, then request
+    ALL records in a single frontend POST call using that count as pageSize.
+    This avoids any pagination complexity entirely.
     #>
     param([string]$BaseUrl, [hashtable]$Headers)
-
-    $allEntities = [System.Collections.Generic.List[object]]::new()
-    $pageSize    = 100
-    $pageNum     = 0
-    $totalCount  = $null
 
     $requiredFields = @(
         "id","enabled","ruleStatus","accessGroupId","accessGroupPath","isInternal",
@@ -414,7 +412,7 @@ function Get-FrontendExclusions {
         "accessGroup","ruleName","rulesCount","hitCount","note","targets","uuid"
     )
 
-    # Build filter tree once -- always exclude deleted; optionally filter by date
+    # Build filter tree -- always exclude deleted; optionally filter by date
     $andClauses = [System.Collections.Generic.List[object]]::new()
     $andClauses.Add(@{ deleted = @{ EQ = 0 } })
     if ($script:cfg_DaysBack -gt 0) {
@@ -424,92 +422,70 @@ function Get-FrontendExclusions {
     }
     $filterTree = @{ AND = $andClauses.ToArray() }
 
-    do {
-        $pageNum++
+    # Step 1: Get the total count from the documented REST API
+    # Use $count=1 and optionally a date filter to match the frontend filter
+    $countUrl = "$BaseUrl/api/v1/exclusions?`$count=1&`$top=1"
+    if ($script:cfg_DaysBack -gt 0) {
+        $since    = (Get-Date).ToUniversalTime().AddDays(-$script:cfg_DaysBack).ToString("yyyy-MM-ddTHH:mm:ssZ")
+        $countUrl = "$BaseUrl/api/v1/exclusions?`$count=1&`$top=1&`$filter=timestamp ge $since"
+    }
 
-        # Use numeric offset pagination -- more reliable than pageToken
-        # The URL suffix is the 0-based offset: /frontend/exclusions/0, /frontend/exclusions/100, etc.
-        $offset = ($pageNum - 1) * $pageSize
-        $url    = "$BaseUrl/frontend/exclusions/$offset"
+    Write-Log "  Getting total count from documented API..."
+    $countResp  = Invoke-ApiCall -Uri $countUrl -Headers $Headers
+    $countProp  = $countResp.PSObject.Properties['count']
+    $totalCount = if ($null -ne $countProp -and $null -ne $countProp.Value) { [int]$countProp.Value } else { 0 }
 
-        $body = @{
-            pageSize     = $pageSize
-            forceRefresh = ($pageNum -eq 1)   # force refresh only on first page
-            groupId      = 1
-            pageToken    = ""
-            localFilters = @{
-                filterTree = $filterTree
-                subgroups  = $false
-            }
-            sortOrders     = @( @{ column = "timestamp"; ascend = $false } )
-            requiredFields = $requiredFields
-            sessionId      = [guid]::NewGuid().ToString()
+    if ($totalCount -eq 0) {
+        Write-Log "  Total count returned 0 -- no exclusions to fetch." "WARN"
+        return [System.Collections.Generic.List[object]]::new()
+    }
+
+    Write-Log "  Total exclusions to fetch: $totalCount" "OK"
+
+    # Step 2: Fetch ALL records in one call using totalCount as pageSize
+    # The frontend endpoint has no documented limit so this should work fine
+    $body = @{
+        pageSize     = $totalCount
+        forceRefresh = $true
+        groupId      = 1
+        pageToken    = ""
+        localFilters = @{
+            filterTree = $filterTree
+            subgroups  = $false
         }
+        sortOrders     = @( @{ column = "timestamp"; ascend = $false } )
+        requiredFields = $requiredFields
+        sessionId      = [guid]::NewGuid().ToString()
+    }
 
-        Write-Log "  Frontend page $pageNum (offset=$offset) URL=$url..."
-        $resp = Invoke-ApiCall -Uri $url -Method "POST" -Headers $Headers -Body $body
+    Write-Log "  Fetching all $totalCount exclusions from frontend endpoint in one call..."
+    Write-Progress -Id 1 -Activity "Fetching frontend exclusions" -Status "Requesting all $totalCount records..." -PercentComplete 50
 
-        # Capture totalCount from first response -- handle case-insensitive field names
-        if ($null -eq $totalCount) {
-            foreach ($tcName in @('totalCount','totalcount','TotalCount')) {
-                $tcProp = $resp.PSObject.Properties[$tcName]
-                if ($null -ne $tcProp -and $null -ne $tcProp.Value) {
-                    $totalCount = [int]$tcProp.Value
-                    Write-Log "  Server reports $totalCount total exclusions."
-                    break
-                }
-            }
-        }
-
-        # Get entities -- handle case-insensitive field name
-        $entProp = $null
-        foreach ($eName in @('entities','Entities')) {
-            $entProp = $resp.PSObject.Properties[$eName]
-            if ($null -ne $entProp -and $null -ne $entProp.Value) { break }
-        }
-
-        if ($null -eq $entProp -or $null -eq $entProp.Value) {
-            Write-Log "  No entities in frontend response -- stopping." "WARN"
-            break
-        }
-
-        $batch = @($entProp.Value)
-        if ($batch.Count -eq 0) {
-            Write-Log "  Empty batch returned -- pagination complete." "OK"
-            break
-        }
-
-        $allEntities.AddRange([object[]]$batch)
-
-        $firstId    = try { Get-Prop $batch[0] 'id' '?' } catch { '?' }
-        $totalSuffix = if ($null -ne $totalCount) { " / $totalCount" } else { "" }
-        $pct         = if ($null -ne $totalCount -and $totalCount -gt 0) { [int]([Math]::Min(99, $allEntities.Count / $totalCount * 100)) } else { 0 }
-        Write-Log "  Page $pageNum : +$($batch.Count) entities, first id=$firstId (total so far: $($allEntities.Count)$totalSuffix)" "OK"
-
-        Write-Progress -Id 1 -Activity "Fetching frontend exclusions" `
-            -Status "Page $pageNum | $($allEntities.Count) collected$totalSuffix" `
-            -PercentComplete $pct
-
-        # Stop when we have collected all records the server reported
-        if ($null -ne $totalCount -and $allEntities.Count -ge $totalCount) {
-            Write-Log "  All $totalCount records collected." "OK"
-            break
-        }
-        # Also stop if batch was smaller than a full page (last page)
-        if ($batch.Count -lt $pageSize) {
-            Write-Log "  Partial page ($($batch.Count) < $pageSize) -- last page reached." "OK"
-            break
-        }
-        # Safety cap
-        if ($allEntities.Count -ge 10000) {
-            Write-Log "  Safety cap (10000) reached -- stopping." "WARN"
-            break
-        }
-
-    } while ($true)
+    $resp = Invoke-ApiCall -Uri "$BaseUrl/frontend/exclusions/0" -Method "POST" -Headers $Headers -Body $body
 
     Write-Progress -Id 1 -Activity "Fetching frontend exclusions" -Completed
-    Write-Log "Frontend fetch complete: $($allEntities.Count) entities." "OK"
+
+    # Extract entities
+    $entProp = $null
+    foreach ($eName in @('entities','Entities')) {
+        $entProp = $resp.PSObject.Properties[$eName]
+        if ($null -ne $entProp -and $null -ne $entProp.Value) { break }
+    }
+
+    if ($null -eq $entProp -or $null -eq $entProp.Value) {
+        Write-Log "  No entities in frontend response." "WARN"
+        return [System.Collections.Generic.List[object]]::new()
+    }
+
+    $allEntities = [System.Collections.Generic.List[object]]::new()
+    $allEntities.AddRange([object[]]@($entProp.Value))
+
+    Write-Log "Frontend fetch complete: $($allEntities.Count) / $totalCount entities." "OK"
+
+    if ($allEntities.Count -lt $totalCount) {
+        Write-Log "  WARNING: received $($allEntities.Count) but expected $totalCount. Some records may be missing." "WARN"
+    }
+
     return $allEntities
 }
 
