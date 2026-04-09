@@ -1181,6 +1181,11 @@ function renderDetail(i) {
         <div class="xml-empty">No XML body &mdash; this is a standard criteria exclusion or was exported without -FetchDetails</div>
        </div>`;
 
+  const noteDisplayHtml = hasNote
+    ? '<div class="section-label">&#128221; Note</div>' +
+      '<div class="note-block" style="border-left-color:var(--accent2);margin-bottom:20px">' + esc(notes[String(d.id)]) + '</div>'
+    : '';
+
   document.getElementById('detailPanel').innerHTML = `
     <div class="detail-nav">
       <button class="nav-btn" onclick="navigate(-1)" ${i === 0 ? 'disabled' : ''}>&larr; Prev</button>
@@ -1210,10 +1215,7 @@ function renderDetail(i) {
       </div>
     </div>
 
-    ${hasNote ? `
-    <div class="section-label">&#128221; Note</div>
-    <div class="note-block" style="border-left-color:var(--accent2);margin-bottom:20px">${esc(notes[String(d.id)])}</div>
-    ` : ''}
+    ${noteDisplayHtml}
 
     <div class="detail-header">
       <div class="detail-title">${esc(d.name || '(unnamed)')}</div>
