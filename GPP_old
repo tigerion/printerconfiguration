@@ -1150,7 +1150,7 @@ function renderDetail(i) {
           </div>
           <button class="unmark-btn" onclick="unmarkReviewed('${d.id}')">&#8617; Mark as Pending</button>
         </div>
-        ${(notes[String(d.id)] || revEntry.note) ? `<div class="review-note">${esc(notes[String(d.id)] || revEntry.note)}</div>` : ''}
+
       </div>`
     : '';
 
@@ -1209,6 +1209,11 @@ function renderDetail(i) {
         <button class="note-clear-btn" onclick="toggleNotePanel('${d.id}')">Cancel</button>
       </div>
     </div>
+
+    ${hasNote ? `
+    <div class="section-label">&#128221; Note</div>
+    <div class="note-block" style="border-left-color:var(--accent2);margin-bottom:20px">${esc(notes[String(d.id)])}</div>
+    ` : ''}
 
     <div class="detail-header">
       <div class="detail-title">${esc(d.name || '(unnamed)')}</div>
