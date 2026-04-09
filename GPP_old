@@ -1504,7 +1504,7 @@ function navigate(dir) {
 document.addEventListener('keydown', e => {
   if (app.style.display === 'none') return;
   if (document.getElementById('flagModal').classList.contains('open')) return;
-  if (e.target.tagName === 'INPUT') return;
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
   if (e.key === 'ArrowRight' || e.key === 'ArrowDown') { e.preventDefault(); navigate(1); }
   if (e.key === 'ArrowLeft'  || e.key === 'ArrowUp')   { e.preventDefault(); navigate(-1); }
   if (e.key === 'f' || e.key === 'F') { const d = filteredData[currentIndex]; if (d) toggleFlag(String(d.id)); }
