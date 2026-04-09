@@ -875,9 +875,9 @@
   <!-- Stats panel -->
   <div class="stats-panel" id="statsPanel">
     <div class="stats-header">
-      <span class="stats-title">&#128202; Reviewer Statistics</span>
+      <span class="stats-title">&#128202; Exclusion Author Statistics</span>
       <button class="stats-toggle" id="statsToggleMode" onclick="toggleStatsMode()" title="Switch between count and percent">Show %</button>
-      <span style="font-size:11px;color:var(--muted)">Click a reviewer to exclude from stats</span>
+      <span style="font-size:11px;color:var(--muted)">Click an author to exclude from stats</span>
     </div>
     <div class="stats-grid" id="statsGrid"></div>
   </div>
@@ -1059,6 +1059,9 @@ function initApp() {
   dropzone.style.display = 'none';
   app.style.display = 'flex';
   updateStats();
+  // Refresh stats panel if already open
+  const sp = document.getElementById('statsPanel');
+  if (sp && sp.classList.contains('open')) renderStats();
 }
 
 function resetApp() {
@@ -1596,19 +1599,24 @@ function renderStats() {
   const grid = document.getElementById('statsGrid');
   if (!grid) return;
 
-  // Count reviewed per reviewer (excluding excluded reviewers)
+  // Count exclusions per author from the loaded export data
+  // excludedReviewers Set is reused here as "excludedAuthors" for filtering
   const counts = {};
-  let total = 0;
-  Object.values(reviewed).forEach(e => {
-    const name = e.reviewerName || 'Unknown';
+  allData.forEach(d => {
+    const name = (d.author && d.author.trim()) ? d.author.trim() : '(unknown)';
     counts[name] = (counts[name] || 0) + 1;
-    total++;
   });
 
-  if (total === 0) {
-    grid.innerHTML = '<span style="color:var(--muted);font-size:13px;font-style:italic">No reviewed exclusions yet.</span>';
+  if (Object.keys(counts).length === 0) {
+    grid.innerHTML = '<span style="color:var(--muted);font-size:13px;font-style:italic">No exclusion data loaded yet.</span>';
     return;
   }
+
+  // Total excluding any excluded authors (for percentage calculation)
+  const includedTotal = Object.entries(counts)
+    .filter(([name]) => !excludedReviewers.has(name))
+    .reduce((sum, [, n]) => sum + n, 0);
+  const grandTotal = Object.values(counts).reduce((s, n) => s + n, 0);
 
   const maxCount = Math.max(...Object.values(counts));
 
@@ -1616,10 +1624,11 @@ function renderStats() {
     .sort((a, b) => b[1] - a[1])
     .map(([name, count]) => {
       const isExcluded = excludedReviewers.has(name);
-      const pct        = total > 0 ? ((count / total) * 100).toFixed(1) : 0;
+      const base       = statsShowPct ? (isExcluded ? grandTotal : includedTotal) : grandTotal;
+      const pct        = base > 0 ? ((count / base) * 100).toFixed(1) : '0.0';
       const barWidth   = maxCount > 0 ? Math.round((count / maxCount) * 100) : 0;
-      const label      = statsShowPct ? pct + '%' : count + ' / ' + total;
-      return '<div class="stats-row' + (isExcluded ? ' excluded' : '') + '" onclick="toggleExcludeReviewer(\'' + esc(name) + '\')" title="Click to exclude from stats">'
+      const label      = statsShowPct ? pct + '%' : count + ' / ' + grandTotal;
+      return '<div class="stats-row' + (isExcluded ? ' excluded' : '') + '" onclick="toggleExcludeAuthor(this.dataset.name)" data-name="' + esc(name) + '" title="Click to exclude this author from stats">'
         + '<span class="stats-name">' + esc(name) + '</span>'
         + '<div class="stats-bar-wrap"><div class="stats-bar" style="width:' + (isExcluded ? 0 : barWidth) + '%"></div></div>'
         + '<span class="stats-count">' + label + '</span>'
@@ -1627,7 +1636,7 @@ function renderStats() {
     }).join('');
 }
 
-function toggleExcludeReviewer(name) {
+function toggleExcludeAuthor(name) {
   if (excludedReviewers.has(name)) excludedReviewers.delete(name);
   else excludedReviewers.add(name);
   renderStats();
