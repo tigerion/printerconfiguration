@@ -963,44 +963,49 @@ function loadStateFile(file) {
     try {
       const raw    = e.target.result.replace(/^﻿/, '');
       const parsed = JSON.parse(raw);
-      // State file format: { reviewed: { "id": { reviewerName, timestamp, note } } }
+      // Validate it's a state file -- must have at least one of these keys
+      const isValidState = parsed.reviewed || parsed.flagged || parsed.notes;
+      if (!isValidState) {
+        alert('Not a valid review state file.');
+        return;
+      }
+
+      let added = 0, skipped = 0;
+
+      // Merge reviewed entries
       if (parsed.reviewed && typeof parsed.reviewed === 'object') {
-        // MERGE into current reviewed state -- never replace.
-        // This means multiple state files from different reviewers can be
-        // loaded one after another and all entries are preserved.
-        // If the same exclusion was reviewed by two people, the EARLIER
-        // review is kept (first reviewer wins).
-        let added = 0, skipped = 0;
         Object.entries(parsed.reviewed).forEach(([id, entry]) => {
           if (!reviewed[id]) { reviewed[id] = entry; added++; }
           else skipped++;
         });
-        // Load notes (standalone notes not tied to reviewed state)
-        if (parsed.notes && typeof parsed.notes === 'object') {
-          Object.entries(parsed.notes).forEach(([id, text]) => {
-            if (!notes[id]) notes[id] = text;
-          });
-        }
-        // Also extract inline notes from reviewed entries
+        // Extract inline notes from reviewed entries
         Object.entries(parsed.reviewed).forEach(([id, entry]) => {
           if (entry.note && !notes[id]) notes[id] = entry.note;
         });
-        // Restore flagged items -- merge with existing
-        if (Array.isArray(parsed.flagged)) {
-          parsed.flagged.forEach(id => flagged.add(String(id)));
-        }
-        stateLoaded = true;
-        const total      = Object.keys(reviewed).length;
-        const totalFlags = flagged.size;
-        document.getElementById('stateFileHint').textContent =
-          `State merged: ${total} reviewed, ${totalFlags} flagged (${added} new reviews added)`;
-        document.getElementById('stateDropBox').style.borderColor = 'var(--green)';
-        document.getElementById('stateDropBox').style.borderStyle = 'solid';
-        // If app already open, refresh
-        if (app.style.display !== 'none') { updateStats(); applyFilters(); }
-      } else {
-        alert('Not a valid review state file. Expected { "reviewed": { ... } }');
       }
+
+      // Merge standalone notes
+      if (parsed.notes && typeof parsed.notes === 'object') {
+        Object.entries(parsed.notes).forEach(([id, text]) => {
+          if (!notes[id]) notes[id] = text;
+        });
+      }
+
+      // Merge flagged items -- always processed regardless of reviewed state
+      if (Array.isArray(parsed.flagged)) {
+        parsed.flagged.forEach(id => flagged.add(String(id)));
+      }
+
+      stateLoaded = true;
+      const total      = Object.keys(reviewed).length;
+      const totalFlags = flagged.size;
+      const totalNotes = Object.keys(notes).length;
+      document.getElementById('stateFileHint').textContent =
+        `State merged: ${total} reviewed, ${totalFlags} flagged, ${totalNotes} notes (${added} new reviews added)`;
+      document.getElementById('stateDropBox').style.borderColor = 'var(--green)';
+      document.getElementById('stateDropBox').style.borderStyle = 'solid';
+      // If app already open, refresh
+      if (app.style.display !== 'none') { updateStats(); applyFilters(); }
     } catch(err) {
       alert('Failed to parse state file: ' + err.message);
     }
