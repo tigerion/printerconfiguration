@@ -966,9 +966,11 @@ function loadStateFile(file) {
       // Validate it's a state file -- must have at least one of these keys
       const isValidState = parsed.reviewed || parsed.flagged || parsed.notes;
       if (!isValidState) {
-        alert('Not a valid review state file.');
+        alert('Not a valid review state file.\n\nTop-level keys found: ' + Object.keys(parsed).join(', '));
         return;
       }
+
+
 
       let added = 0, skipped = 0;
 
@@ -1014,7 +1016,8 @@ function loadStateFile(file) {
 }
 
 function initApp() {
-  flagged.clear();
+  // Do NOT clear flagged/reviewed/notes here -- state file may have been
+  // loaded before the export, and initApp must not wipe it.
   currentFilter = 'all';
   currentIndex  = 0;
   document.getElementById('searchInput').value = '';
@@ -1025,8 +1028,8 @@ function initApp() {
 }
 
 function resetApp() {
-  allData = []; filteredData = []; flagged.clear();
-  // Keep reviewed state, notes and reviewer name across sessions
+  allData = []; filteredData = []; flagged.clear(); reviewed = {}; notes = {};
+  // Reviewer name is kept across sessions
   app.style.display = 'none';
   dropzone.style.display = 'flex';
   fileInput.value = '';
