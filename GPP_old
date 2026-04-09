@@ -1,1485 +1,1515 @@
-#Requires -Version 5.1
-<#
-.SYNOPSIS
-    Exports all detections from ESET Inspect On-Prem via REST API, including analyst notes/comments.
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ESET Exclusion Reviewer</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Syne:wght@400;600;700;800&display=swap');
 
-.DESCRIPTION
-    Authenticates against the ESET Inspect On-Prem REST API, retrieves all detections with full
-    detail (including analyst notes/comments) using paginated requests, and exports results to
-    CSV and/or JSON.
+  :root {
+    --bg:        #0d0f14;
+    --surface:   #13161e;
+    --surface2:  #1a1e28;
+    --border:    #252a38;
+    --accent:    #4f8ef7;
+    --accent2:   #7c3aed;
+    --green:     #22c55e;
+    --red:       #ef4444;
+    --yellow:    #f59e0b;
+    --text:      #e2e8f0;
+    --muted:     #64748b;
+    --code-bg:   #0a0c10;
+    --flag:      #f59e0b;
+  }
 
-    CONFIG FILE SUPPORT
-    -------------------
-    Any parameter can be stored in a JSON config file to avoid retyping on every run.
-    By default the script looks for "eset-config.json" in the same directory as the script.
-    Use -ConfigFile to specify a different path.
+  * { box-sizing: border-box; margin: 0; padding: 0; }
 
-    Priority order (highest to lowest):
-        1. Explicit command-line argument      -Server "x"
-        2. Config file value                   { "Server": "x" }
-        3. Built-in script default             (e.g. PageSize = 100)
+  body {
+    font-family: 'Syne', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
 
-    This means you can set permanent defaults in the config and still override any individual
-    value on the command line for a single run without editing the file.
+  /* ---- DROP ZONE ---- */
+  #dropzone {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    gap: 24px;
+    padding: 40px;
+    transition: background 0.2s;
+  }
+  #dropzone.drag-over { background: rgba(79,142,247,0.06); }
 
-    Passwords in the config are stored as a DPAPI-encrypted Base64 string (Windows only).
-    Use -SavePassword to encrypt and write your password to the config file.
-    On non-Windows systems (PS 7+ on Linux/macOS) plaintext passwords are not supported in
-    the config for security reasons -- you will always be prompted interactively.
+  .drop-logo {
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.3em;
+    color: var(--muted);
+    text-transform: uppercase;
+  }
 
-    GENERATE A CONFIG FILE
-    ----------------------
-    Run with -GenerateConfig to write a template config to disk:
-        .\Export-EsetInspectDetections.ps1 -GenerateConfig
-        .\Export-EsetInspectDetections.ps1 -GenerateConfig -ConfigFile "C:\Tools\my-eset.json"
+  .drop-title {
+    font-size: clamp(32px, 5vw, 56px);
+    font-weight: 800;
+    text-align: center;
+    line-height: 1.1;
+    background: linear-gradient(135deg, #e2e8f0 0%, var(--accent) 60%, var(--accent2) 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
 
-    SAVE YOUR PASSWORD TO THE CONFIG
-    ---------------------------------
-        .\Export-EsetInspectDetections.ps1 -ConfigFile ".\eset-config.json" -SavePassword
+  .drop-sub {
+    color: var(--muted);
+    font-size: 15px;
+    text-align: center;
+    max-width: 420px;
+    line-height: 1.6;
+  }
 
-    The list endpoint (GET /api/v1/detections) is called first with pagination. Then the detail
-    endpoint (GET /api/v1/detections/{id}) is called per-detection to retrieve fields only
-    available there: note (analyst comment), handled, processPath, moduleFirstSeenLocally,
-    moduleLastExecutedLocally.
+  .drop-box {
+    border: 2px dashed var(--border);
+    border-radius: 16px;
+    padding: 48px 64px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color 0.2s, background 0.2s;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+  }
+  .drop-box:hover, .drop-box.active { border-color: var(--accent); background: rgba(79,142,247,0.04); }
 
-    Robustness features:
-      - Config file with DPAPI-encrypted password storage (Windows)
-      - Parameter validation with meaningful error messages
-      - -DaysBack convenience parameter (auto-builds creationTime filter)
-      - -DaysBack and -Filter are mutually exclusive (validated at runtime)
-      - Pre-flight DNS resolution + TCP-443 connectivity check
-      - Output directory auto-creation + writability test before any API calls
-      - Explicit auth success/failure messages (HTTP status + token presence + token length)
-      - HTTP 401 / 403 / 404 / 0 authentication error disambiguation
-      - Session token age warning at 20 min (sessions typically expire ~30 min)
-      - Automatic retry with exponential back-off on 429 / 5xx / network errors
-      - Respects Retry-After header on 429 responses
-      - OData filter pre-validation (warns on unrecognised fields/operators)
-      - Write-Progress bars for list pages and per-detection detail fetch
-      - Graceful partial export on fatal error (saves whatever was collected)
-      - Password zeroed from memory immediately after authentication
-      - Structured JSON run-log with full audit trail saved alongside exports
-      - Emergency run-log saved on any fatal error
-      - Proper exit codes: 0 = success / no results, 1 = error
+  .drop-icon {
+    width: 56px; height: 56px;
+    border-radius: 14px;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    display: flex; align-items: center; justify-content: center;
+    font-size: 24px;
+  }
 
-.PARAMETER ConfigFile
-    Path to a JSON config file. Defaults to "eset-config.json" in the script directory.
-    If the file does not exist the script continues using only command-line arguments and defaults.
+  .drop-label { font-size: 16px; font-weight: 600; }
+  .drop-hint  { font-size: 13px; color: var(--muted); }
 
-.PARAMETER GenerateConfig
-    Write a template config file to disk (at -ConfigFile path) and exit.
-    Existing files will NOT be overwritten unless -Force is also specified.
+  #fileInput { display: none; }
 
-.PARAMETER SavePassword
-    Encrypt the password (prompted securely) using Windows DPAPI and save it to the config file.
-    The encrypted value is tied to the current Windows user account and machine.
-    Exits after saving -- does not run an export.
+  /* ---- APP SHELL ---- */
+  #app { display: none; flex-direction: column; height: 100vh; overflow: hidden; }
 
-.PARAMETER Force
-    Allow -GenerateConfig to overwrite an existing config file.
+  /* ---- TOPBAR ---- */
+  .topbar {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 14px 24px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    flex-wrap: wrap;
+  }
 
-.PARAMETER Server
-    FQDN or IP of the ESET Inspect On-Prem server. Do not include https:// or trailing slash.
-    Examples: inspect.corp.local   /   192.168.1.10
+  .topbar-brand {
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.2em;
+    color: var(--muted);
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
 
-.PARAMETER Username
-    Username for API authentication.
+  .topbar-stats {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
 
-.PARAMETER Password
-    Optional. If omitted you are prompted with a masked secure input (recommended).
-    Avoid passing on the command line -- it appears in shell history.
-    Can be stored encrypted in the config file via -SavePassword.
+  .stat-chip {
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    font-family: 'JetBrains Mono', monospace;
+    border: 1px solid transparent;
+  }
+  .stat-chip.total   { background: rgba(79,142,247,0.12); border-color: rgba(79,142,247,0.3);  color: var(--accent); }
+  .stat-chip.enabled { background: rgba(34,197,94,0.12);  border-color: rgba(34,197,94,0.3);   color: var(--green); }
+  .stat-chip.disabled{ background: rgba(239,68,68,0.12);  border-color: rgba(239,68,68,0.3);   color: var(--red); }
+  .stat-chip.flagged { background: rgba(245,158,11,0.12); border-color: rgba(245,158,11,0.3);  color: var(--yellow); }
 
-.PARAMETER Domain
-    Set to $true when authenticating with a domain account. Default: $false
+  .topbar-spacer { flex: 1; }
 
-.PARAMETER OutputPath
-    Directory where export files are saved. Created automatically if it does not exist.
-    Default: current working directory.
+  .topbar-actions { display: flex; gap: 8px; }
 
-.PARAMETER ExportFormat
-    CSV, JSON, or Both. Default: Both
+  /* ---- FILTER BAR ---- */
+  .filterbar {
+    display: flex;
+    gap: 10px;
+    padding: 12px 24px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    flex-wrap: wrap;
+    align-items: center;
+  }
 
-.PARAMETER DaysBack
-    Convenience parameter. Export detections created within the last N days.
-    Mutually exclusive with -Filter.
-    Example: -DaysBack 30  exports the last 30 days of detections.
+  .search-wrap {
+    position: relative;
+    flex: 1;
+    min-width: 200px;
+    max-width: 380px;
+  }
+  .search-icon {
+    position: absolute;
+    left: 12px; top: 50%;
+    transform: translateY(-50%);
+    color: var(--muted);
+    font-size: 14px;
+    pointer-events: none;
+  }
+  .search-input {
+    width: 100%;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 12px 8px 34px;
+    color: var(--text);
+    font-family: 'Syne', sans-serif;
+    font-size: 14px;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+  .search-input:focus { border-color: var(--accent); }
+  .search-input::placeholder { color: var(--muted); }
 
-.PARAMETER Filter
-    Raw OData filter expression. Mutually exclusive with -DaysBack.
-    Filterable fields : id, resolved, creationTime
-    Supported operators: eq, ne, gt, ge, lt, le, and, or, ()
-    Examples:
-        "resolved eq false"
-        "resolved eq true and creationTime ge 2024-01-01T00:00:00Z"
-        "creationTime ge 2024-06-01T00:00:00Z and creationTime le 2024-06-30T23:59:59Z"
+  .filter-btn {
+    padding: 7px 14px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--surface2);
+    color: var(--muted);
+    font-family: 'Syne', sans-serif;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s;
+    white-space: nowrap;
+  }
+  .filter-btn:hover          { border-color: var(--accent); color: var(--text); }
+  .filter-btn.active         { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .filter-btn.active-red     { background: var(--red);    border-color: var(--red);    color: #fff; }
+  .filter-btn.active-yellow  { background: var(--flag);   border-color: var(--flag);   color: #000; }
 
-.PARAMETER PageSize
-    Detections per list-page API call. Range 1-1000. Default: 100.
+  .filter-label { font-size: 12px; color: var(--muted); font-weight: 600; letter-spacing: 0.05em; }
 
-.PARAMETER FetchDetails
-    When $true (default), calls GET /detections/{id} per detection to populate the note
-    (analyst comment) and other detail-only fields.
-    Use -FetchDetails $false for a faster export that omits those fields.
+  /* ---- MAIN LAYOUT ---- */
+  .main {
+    display: grid;
+    grid-template-columns: 280px 1fr;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+  }
 
-.PARAMETER DetailDelayMs
-    Milliseconds to wait between consecutive detail-fetch calls to avoid throttling.
-    Default: 50. Increase to 200-500 if you see 429 responses on large datasets.
+  /* ---- SIDEBAR ---- */
+  .sidebar {
+    border-right: 1px solid var(--border);
+    overflow-y: auto;
+    background: var(--surface);
+  }
+  .sidebar::-webkit-scrollbar { width: 4px; }
+  .sidebar::-webkit-scrollbar-track { background: transparent; }
+  .sidebar::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
 
-.PARAMETER MaxRetries
-    Maximum retry attempts per failed API call before giving up. Default: 3.
+  .sidebar-list { list-style: none; padding: 8px; }
 
-.PARAMETER FlattenComments
-    When $true, each comment is expanded into its own numbered set of columns instead of
-    being stored as a nested array. This makes the CSV and JSON directly openable in Excel
-    without any further transformation.
-    Columns produced per comment: comment1_author, comment1_time, comment1_text,
-                                   comment2_author, comment2_time, comment2_text, ...
-    The number of columns is determined by the detection with the most comments in the run.
-    Detections with fewer comments have the remaining columns left empty.
-    Default: $false
+  .sidebar-item {
+    padding: 10px 12px;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background 0.12s;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    border: 1px solid transparent;
+    margin-bottom: 2px;
+    position: relative;
+  }
+  .sidebar-item:hover  { background: var(--surface2); }
+  .sidebar-item.active { background: var(--surface2); border-color: var(--accent); }
+  .sidebar-item.flagged-item::before {
+    content: '';
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    width: 3px;
+    background: var(--flag);
+    border-radius: 8px 0 0 8px;
+  }
 
-.PARAMETER SkipCertificateCheck
-    Ignore TLS/SSL certificate errors. Required for self-signed certs. Default: $true.
-    Set to $false in production environments with valid certificates.
+  .item-name {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
 
-.EXAMPLE
-    # Generate a template config file, fill it in, then run with no arguments
-    .\Export-EsetInspectDetections.ps1 -GenerateConfig
-    .\Export-EsetInspectDetections.ps1
+  .item-meta {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+  }
 
-.EXAMPLE
-    # Save your password encrypted into the config (run once, then never type it again)
-    .\Export-EsetInspectDetections.ps1 -SavePassword
+  .badge {
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 700;
+    font-family: 'JetBrains Mono', monospace;
+    letter-spacing: 0.05em;
+  }
+  .badge-enabled  { background: rgba(34,197,94,0.15);  color: var(--green); }
+  .badge-disabled { background: rgba(239,68,68,0.15);  color: var(--red); }
+  .badge-rules    { background: rgba(79,142,247,0.15); color: var(--accent); }
+  .badge-flag     { background: rgba(245,158,11,0.2);  color: var(--flag); }
+  .badge-noxml    { background: rgba(100,116,139,0.2); color: var(--muted); }
 
-.EXAMPLE
-    # Use a named config for a different environment, override just the filter on this run
-    .\Export-EsetInspectDetections.ps1 -ConfigFile ".\prod-eset.json" -DaysBack 7
+  /* ---- DETAIL PANEL ---- */
+  .detail {
+    overflow-y: auto;
+    padding: 28px 32px;
+    background: var(--bg);
+  }
+  .detail::-webkit-scrollbar { width: 4px; }
+  .detail::-webkit-scrollbar-track { background: transparent; }
+  .detail::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
 
-.EXAMPLE
-    # Interactive -- prompts for password securely (no config file)
-    .\Export-EsetInspectDetections.ps1 -Server "inspect.corp.local" -Username "Administrator"
+  .detail-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    gap: 12px;
+    color: var(--muted);
+  }
+  .detail-empty-icon { font-size: 48px; opacity: 0.3; }
+  .detail-empty-text { font-size: 14px; }
 
-.EXAMPLE
-    # Unresolved detections, last 7 days, CSV only, custom output folder
-    $since = (Get-Date).AddDays(-7).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
-    .\Export-EsetInspectDetections.ps1 -Filter "resolved eq false and creationTime ge $since" `
-        -ExportFormat CSV -OutputPath "C:\Reports"
+  .detail-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 24px;
+    flex-wrap: wrap;
+  }
 
-.PARAMETER SaveConfig
-    After a successful export, write all effective settings to the config file so you
-    never have to type them again. The password is encrypted with DPAPI and stored as
-    EncryptedPassword. Existing config values are merged -- only supplied parameters are
-    overwritten, so you can safely run with -SaveConfig on any run without losing other
-    stored settings.
-    Example: run once with all your flags plus -SaveConfig, then run with no arguments forever.
+  .detail-title {
+    font-size: 22px;
+    font-weight: 800;
+    line-height: 1.2;
+    flex: 1;
+  }
 
-.NOTES
-    API reference : https://help.eset.com/ei_navigate/2.5/en-US/rest_api_detections.html
-    Tested against: ESET Inspect On-Prem 2.5 / 2.6
-    Exit codes    : 0 = success (or no detections found), 1 = error
-#>
+  .detail-badges { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 
-[CmdletBinding(SupportsShouldProcess, DefaultParameterSetName = "Run")]
-param(
-    # -- Config file control ---------------------------------------------------
-    [Parameter(ParameterSetName = "Run",            Mandatory = $false)]
-    [Parameter(ParameterSetName = "GenerateConfig", Mandatory = $false)]
-    [Parameter(ParameterSetName = "SavePassword",   Mandatory = $false)]
-    [string]$ConfigFile = "",
+  .detail-nav {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 20px;
+  }
 
-    [Parameter(ParameterSetName = "GenerateConfig", Mandatory = $true)]
-    [switch]$GenerateConfig,
+  .nav-btn {
+    padding: 7px 16px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text);
+    font-family: 'Syne', sans-serif;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .nav-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+  .nav-btn:disabled { opacity: 0.3; cursor: not-allowed; }
 
-    [Parameter(ParameterSetName = "SavePassword",   Mandatory = $true)]
-    [switch]$SavePassword,
+  .nav-counter {
+    font-size: 13px;
+    color: var(--muted);
+    font-family: 'JetBrains Mono', monospace;
+    padding: 0 8px;
+  }
 
-    [Parameter(ParameterSetName = "GenerateConfig", Mandatory = $false)]
-    [switch]$Force,
+  .flag-btn {
+    padding: 7px 16px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--muted);
+    font-family: 'Syne', sans-serif;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .flag-btn:hover       { border-color: var(--flag); color: var(--flag); }
+  .flag-btn.flagged     { background: rgba(245,158,11,0.15); border-color: var(--flag); color: var(--flag); }
 
-    [Parameter(ParameterSetName = "Run", Mandatory = $false)]
-    [switch]$SaveConfig,
+  /* ---- FIELDS GRID ---- */
+  .fields-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 12px;
+    margin-bottom: 24px;
+  }
 
-    # -- Connection ------------------------------------------------------------
-    [Parameter(ParameterSetName = "Run", Mandatory = $false)]
-    [string]$Server = "",
+  .field-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
 
-    [Parameter(ParameterSetName = "Run", Mandatory = $false)]
-    [string]$Username = "",
+  .field-label {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+  }
 
-    [Parameter(ParameterSetName = "Run", Mandatory = $false)]
-    [string]$Password = "",
+  .field-value {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text);
+    word-break: break-all;
+    font-family: 'JetBrains Mono', monospace;
+  }
+  .field-value.empty { color: var(--muted); font-style: italic; font-family: 'Syne', sans-serif; font-weight: 400; }
 
-    [Parameter(ParameterSetName = "Run", Mandatory = $false)]
-    [object]$Domain = $null,          # $null = "not provided by user"
+  /* ---- NOTE BLOCK ---- */
+  .section-label {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    margin-bottom: 10px;
+  }
 
-    # -- Export settings -------------------------------------------------------
-    [Parameter(ParameterSetName = "Run", Mandatory = $false)]
-    [string]$OutputPath = "",
+  .note-block {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+    border-radius: 0 10px 10px 0;
+    padding: 14px 16px;
+    font-size: 14px;
+    line-height: 1.6;
+    margin-bottom: 24px;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .note-block.empty { color: var(--muted); font-style: italic; border-left-color: var(--border); }
 
-    [Parameter(ParameterSetName = "Run", Mandatory = $false)]
-    [ValidateSet("CSV", "JSON", "Both", "")]
-    [string]$ExportFormat = "",
+  /* ---- RULES BLOCK ---- */
+  .rules-block {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 24px;
+  }
 
-    [Parameter(ParameterSetName = "Run", Mandatory = $false)]
-    [ValidateRange(0, 36500)]
-    [int]$DaysBack = -1,              # -1 = "not provided by user"
+  .rule-chip {
+    padding: 5px 12px;
+    border-radius: 6px;
+    background: rgba(79,142,247,0.1);
+    border: 1px solid rgba(79,142,247,0.25);
+    color: var(--accent);
+    font-size: 12px;
+    font-family: 'JetBrains Mono', monospace;
+  }
 
-    [Parameter(ParameterSetName = "Run", Mandatory = $false)]
-    [string]$Filter = "",
+  /* ---- XML BLOCK ---- */
+  .xml-wrap {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+    margin-bottom: 24px;
+  }
 
-    # -- Tuning ----------------------------------------------------------------
-    [Parameter(ParameterSetName = "Run", Mandatory = $false)]
-    [ValidateRange(1, 1000)]
-    [int]$PageSize = -1,              # -1 = "not provided by user"
+  .xml-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 16px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+  }
 
-    [Parameter(ParameterSetName = "Run", Mandatory = $false)]
-    [object]$FetchDetails = $null,    # $null = "not provided by user"
+  .xml-toolbar-label {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+  }
 
-    [Parameter(ParameterSetName = "Run", Mandatory = $false)]
-    [ValidateRange(-1, 60000)]
-    [int]$DetailDelayMs = -1,         # -1 = "not provided by user"
+  .copy-btn {
+    padding: 4px 10px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--muted);
+    font-family: 'Syne', sans-serif;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .copy-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .copy-btn.copied { border-color: var(--green); color: var(--green); }
 
-    [Parameter(ParameterSetName = "Run", Mandatory = $false)]
-    [ValidateRange(-1, 10)]
-    [int]$MaxRetries = -1,            # -1 = "not provided by user"
+  .xml-code {
+    padding: 20px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12.5px;
+    line-height: 1.7;
+    overflow-x: auto;
+    white-space: pre;
+    color: #94a3b8;
+    max-height: 480px;
+    overflow-y: auto;
+  }
+  .xml-code::-webkit-scrollbar { width: 4px; height: 4px; }
+  .xml-code::-webkit-scrollbar-track { background: transparent; }
+  .xml-code::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
 
-    [Parameter(ParameterSetName = "Run", Mandatory = $false)]
-    [object]$FlattenComments = $null,       # $null = "not provided by user"
+  /* XML syntax highlighting */
+  .xml-tag       { color: #7dd3fc; }
+  .xml-attr      { color: #86efac; }
+  .xml-val       { color: #fca5a5; }
+  .xml-comment   { color: #475569; font-style: italic; }
+  .xml-text      { color: #e2e8f0; }
 
-    [Parameter(ParameterSetName = "Run", Mandatory = $false)]
-    [object]$SkipCertificateCheck = $null   # $null = "not provided by user"
-)
+  .xml-empty {
+    padding: 20px;
+    color: var(--muted);
+    font-style: italic;
+    font-family: 'Syne', sans-serif;
+    font-size: 14px;
+  }
 
-Set-StrictMode -Version Latest
-$ErrorActionPreference = "Stop"
+  /* ---- BUTTONS ---- */
+  .btn {
+    padding: 8px 16px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--surface2);
+    color: var(--text);
+    font-family: 'Syne', sans-serif;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+  }
+  .btn:hover          { border-color: var(--accent); }
+  .btn.btn-accent     { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn.btn-accent:hover { background: #3d7ae5; }
+  .btn.btn-danger     { background: rgba(239,68,68,0.1); border-color: var(--red); color: var(--red); }
 
-# -- Script-scoped state ------------------------------------------------------
-$script:RunStart        = Get-Date
-$script:AuthTime        = $null
-$script:ExitCode        = 0
-$script:RunLog          = [System.Collections.Generic.List[hashtable]]::new()
-$script:NullDebugWritten = $false   # write null-field debug file only once per run
+  /* ---- EXPORT MODAL ---- */
+  .modal-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.7);
+    backdrop-filter: blur(4px);
+    z-index: 100;
+    align-items: center;
+    justify-content: center;
+  }
+  .modal-overlay.open { display: flex; }
 
-$script:IpDiagWritten    = $false   # write IP diagnostic log only once per run
+  .modal {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 28px;
+    width: 90%;
+    max-width: 560px;
+    max-height: 80vh;
+    overflow-y: auto;
+  }
 
-# Resolve the default config path (same directory as the script)
-$script:DefaultConfigPath = Join-Path $PSScriptRoot "eset-config.json"
+  .modal-title {
+    font-size: 18px;
+    font-weight: 800;
+    margin-bottom: 8px;
+  }
 
-#region -- Logging ---------------------------------------------------------------
+  .modal-sub { font-size: 13px; color: var(--muted); margin-bottom: 20px; }
 
-function Write-Log {
-    param(
-        [string]$Message,
-        [ValidateSet("INFO", "OK", "WARN", "ERROR", "DEBUG")]
-        [string]$Level = "INFO"
-    )
-    $ts = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-    $color = switch ($Level) {
-        "OK"    { "Green"    }
-        "WARN"  { "Yellow"   }
-        "ERROR" { "Red"      }
-        "DEBUG" { "DarkGray" }
-        default { "Cyan"     }
-    }
-    Write-Host "[$ts][$Level] $Message" -ForegroundColor $color
-    $script:RunLog.Add(@{ timestamp = $ts; level = $Level; message = $Message })
+  .modal-list { list-style: none; display: flex; flex-direction: column; gap: 8px; margin-bottom: 20px; }
+
+  .modal-item {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--flag);
+    border-radius: 0 8px 8px 0;
+    padding: 10px 14px;
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  .modal-item-id { font-size: 11px; color: var(--muted); font-family: 'JetBrains Mono', monospace; margin-top: 2px; }
+
+  .modal-actions { display: flex; gap: 10px; justify-content: flex-end; }
+
+  /* ---- SCROLLBAR GLOBAL ---- */
+  ::-webkit-scrollbar       { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+  .no-results {
+    padding: 24px;
+    text-align: center;
+    color: var(--muted);
+    font-size: 13px;
+  }
+
+  /* ---- REVIEWED STATE ---- */
+  .sidebar-item.reviewed-item { opacity: 0.45; }
+  .sidebar-item.reviewed-item .item-name { text-decoration: line-through; }
+
+  .badge-reviewed { background: rgba(34,197,94,0.15); color: var(--green); }
+
+  .review-card {
+    background: rgba(34,197,94,0.08);
+    border: 1px solid rgba(34,197,94,0.25);
+    border-left: 3px solid var(--green);
+    border-radius: 0 10px 10px 0;
+    padding: 12px 16px;
+    margin-bottom: 24px;
+    font-size: 13px;
+    line-height: 1.6;
+  }
+  .review-card .review-by   { font-weight: 700; color: var(--green); }
+  .review-card .review-time { color: var(--muted); font-family: 'JetBrains Mono', monospace; font-size: 11px; }
+  .review-card .review-note { margin-top: 6px; color: var(--text); white-space: pre-wrap; }
+
+  .mark-reviewed-btn {
+    padding: 9px 18px;
+    border-radius: 8px;
+    border: 1px solid var(--green);
+    background: rgba(34,197,94,0.1);
+    color: var(--green);
+    font-family: 'Syne', sans-serif;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .mark-reviewed-btn:hover     { background: var(--green); color: #000; }
+  .mark-reviewed-btn.done      { background: var(--green); color: #000; border-color: var(--green); }
+
+  .unmark-btn {
+    padding: 5px 10px;
+    border-radius: 6px;
+    border: 1px solid rgba(239,68,68,0.4);
+    background: transparent;
+    color: var(--red);
+    font-family: 'Syne', sans-serif;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .unmark-btn:hover { background: rgba(239,68,68,0.15); }
+
+  /* ---- NAME PROMPT OVERLAY ---- */
+  .name-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.75);
+    backdrop-filter: blur(6px);
+    z-index: 200;
+    align-items: center;
+    justify-content: center;
+  }
+  .name-overlay.open { display: flex; }
+
+  .name-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 32px;
+    width: 90%;
+    max-width: 420px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .name-card h2 { font-size: 20px; font-weight: 800; }
+  .name-card p  { font-size: 13px; color: var(--muted); line-height: 1.5; }
+
+  .name-input {
+    width: 100%;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 14px;
+    color: var(--text);
+    font-family: 'Syne', sans-serif;
+    font-size: 15px;
+    font-weight: 600;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+  .name-input:focus { border-color: var(--accent); }
+
+  .stat-chip.reviewed { background: rgba(34,197,94,0.12); border-color: rgba(34,197,94,0.3); color: var(--green); }
+
+  /* ---- NOTE PANEL ---- */
+  .note-panel {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent2);
+    border-radius: 0 10px 10px 0;
+    padding: 14px 16px;
+    margin-bottom: 24px;
+    display: none;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .note-panel.open { display: flex; }
+
+  .note-panel-label {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+  }
+
+  .note-textarea {
+    width: 100%;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    color: var(--text);
+    font-family: 'Syne', sans-serif;
+    font-size: 13px;
+    line-height: 1.6;
+    resize: vertical;
+    min-height: 80px;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+  .note-textarea:focus { border-color: var(--accent2); }
+  .note-textarea::placeholder { color: var(--muted); font-style: italic; }
+
+  .note-panel-actions { display: flex; gap: 8px; }
+
+  .note-save-btn {
+    padding: 6px 14px;
+    border-radius: 7px;
+    border: 1px solid var(--accent2);
+    background: rgba(124,58,237,0.15);
+    color: var(--accent2);
+    font-family: 'Syne', sans-serif;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .note-save-btn:hover { background: var(--accent2); color: #fff; }
+
+  .note-clear-btn {
+    padding: 6px 14px;
+    border-radius: 7px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--muted);
+    font-family: 'Syne', sans-serif;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .note-clear-btn:hover { border-color: var(--red); color: var(--red); }
+
+  .note-btn {
+    padding: 7px 16px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--muted);
+    font-family: 'Syne', sans-serif;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .note-btn:hover        { border-color: var(--accent2); color: var(--accent2); }
+  .note-btn.has-note     { border-color: var(--accent2); color: var(--accent2); background: rgba(124,58,237,0.1); }
+</style>
+</head>
+<body>
+
+<!-- NAME PROMPT OVERLAY -->
+<div class="name-overlay open" id="nameOverlay">
+  <div class="name-card">
+    <h2>&#128100; Who is reviewing?</h2>
+    <p>Your name will be recorded with each exclusion you mark as reviewed, and saved in the review state file.</p>
+    <input class="name-input" id="reviewerNameInput" type="text" placeholder="Your name..." maxlength="80"
+           onkeydown="if(event.key==='Enter') confirmReviewerName()">
+    <button class="btn btn-accent" onclick="confirmReviewerName()">Start Review &rarr;</button>
+  </div>
+</div>
+
+<!-- DROP ZONE -->
+<div id="dropzone">
+  <div class="drop-logo">ESET Inspect</div>
+  <h1 class="drop-title">Exclusion<br>Reviewer</h1>
+  <p class="drop-sub">Load your exported JSON file to review exclusions. Optionally load a previous review state file to skip already-reviewed items.</p>
+  <div class="drop-box" id="dropBox" onclick="document.getElementById('fileInput').click()">
+    <div class="drop-icon">&#128196;</div>
+    <div class="drop-label">Drop JSON export here</div>
+    <div class="drop-hint">or click to browse &mdash; exported by Export-EsetInspectExclusions.ps1</div>
+  </div>
+  <input type="file" id="fileInput" accept=".json">
+  <div style="display:flex;align-items:center;gap:12px;margin-top:8px">
+    <div style="flex:1;height:1px;background:var(--border)"></div>
+    <span style="font-size:12px;color:var(--muted)">optionally load previous review state</span>
+    <div style="flex:1;height:1px;background:var(--border)"></div>
+  </div>
+  <div class="drop-box" id="stateDropBox" onclick="document.getElementById('stateFileInput').click()" style="padding:20px 40px">
+    <div class="drop-icon" style="width:36px;height:36px;border-radius:10px;font-size:16px">&#128204;</div>
+    <div class="drop-label" style="font-size:13px">Load review state file</div>
+    <div class="drop-hint" id="stateFileHint">No state file loaded &mdash; load multiple files to merge reviews from different team members</div>
+  </div>
+  <input type="file" id="stateFileInput" accept=".json">
+</div>
+
+<!-- APP -->
+<div id="app">
+  <!-- Top bar -->
+  <div class="topbar">
+    <div class="topbar-brand">ESET &mdash; Exclusion Reviewer</div>
+    <div class="topbar-stats" id="topbarStats"></div>
+    <div class="topbar-spacer"></div>
+    <div class="topbar-actions">
+      <button class="btn" onclick="openFlagModal()" id="exportFlagBtn">&#9873; Export Flagged</button>
+      <button class="btn btn-accent" onclick="saveStateFile()">&#128190; Save Review State</button>
+      <button class="btn" onclick="resetApp()">&#8617; Load New File</button>
+    </div>
+  </div>
+
+  <!-- Filter bar -->
+  <div class="filterbar">
+    <div class="search-wrap">
+      <span class="search-icon">&#128269;</span>
+      <input class="search-input" type="text" id="searchInput" placeholder="Search by name, note, rule ID..." oninput="applyFilters()">
+    </div>
+    <span class="filter-label">Show:</span>
+    <button class="filter-btn active" id="filterAll"        onclick="setFilter('all')">All</button>
+    <button class="filter-btn"        id="filterPending"    onclick="setFilter('pending')">Pending</button>
+    <button class="filter-btn"        id="filterReviewed"   onclick="setFilter('reviewed')">Reviewed</button>
+    <button class="filter-btn"        id="filterEnabled"    onclick="setFilter('enabled')">Enabled</button>
+    <button class="filter-btn"        id="filterDisabled"   onclick="setFilter('disabled')">Disabled</button>
+    <button class="filter-btn"        id="filterFlagged"    onclick="setFilter('flagged')">Flagged</button>
+    <button class="filter-btn"        id="filterNoRules"    onclick="setFilter('norules')">No Rules</button>
+  </div>
+
+  <!-- Main -->
+  <div class="main">
+    <aside class="sidebar">
+      <ul class="sidebar-list" id="sidebarList"></ul>
+    </aside>
+    <section class="detail" id="detailPanel">
+      <div class="detail-empty">
+        <div class="detail-empty-icon">&#128196;</div>
+        <div class="detail-empty-text">Select an exclusion from the list</div>
+      </div>
+    </section>
+  </div>
+</div>
+
+<!-- Flag export modal -->
+<div class="modal-overlay" id="flagModal">
+  <div class="modal">
+    <div class="modal-title">&#9873; Flagged Exclusions</div>
+    <div class="modal-sub" id="flagModalSub"></div>
+    <ul class="modal-list" id="flagList"></ul>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeFlagModal()">Close</button>
+      <button class="btn btn-accent" onclick="downloadFlagged()">&#8681; Download JSON</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ============================================================
+// STATE
+// ============================================================
+let allData       = [];
+let filteredData  = [];
+let flagged       = new Set();
+let reviewed      = {};   // { id: { reviewerName, timestamp, note } }
+let notes         = {};   // { id: noteText } -- decoupled from reviewed so anyone can add notes
+let currentFilter = 'all';
+let currentIndex  = 0;
+let reviewerName  = '';
+let stateLoaded   = false;
+
+// ============================================================
+// REVIEWER NAME PROMPT
+// ============================================================
+function confirmReviewerName() {
+  const val = document.getElementById('reviewerNameInput').value.trim();
+  if (!val) {
+    document.getElementById('reviewerNameInput').style.borderColor = 'var(--red)';
+    return;
+  }
+  reviewerName = val;
+  document.getElementById('nameOverlay').classList.remove('open');
 }
 
-#endregion
+// ============================================================
+// FILE LOADING
+// ============================================================
+const dropzone      = document.getElementById('dropzone');
+const app           = document.getElementById('app');
+const fileInput     = document.getElementById('fileInput');
+const dropBox       = document.getElementById('dropBox');
+const stateDropBox  = document.getElementById('stateDropBox');
+const stateFileInput= document.getElementById('stateFileInput');
 
-#region -- Config file -----------------------------------------------------------
+dropBox.addEventListener('dragover', e => { e.preventDefault(); dropzone.classList.add('drag-over'); dropBox.classList.add('active'); });
+dropBox.addEventListener('dragleave', () => { dropzone.classList.remove('drag-over'); dropBox.classList.remove('active'); });
+dropBox.addEventListener('drop', e => {
+  e.preventDefault();
+  dropzone.classList.remove('drag-over');
+  dropBox.classList.remove('active');
+  const file = e.dataTransfer.files[0];
+  if (file) loadFile(file);
+});
+fileInput.addEventListener('change', e => { if (e.target.files[0]) loadFile(e.target.files[0]); });
+stateFileInput.addEventListener('change', e => { if (e.target.files[0]) loadStateFile(e.target.files[0]); });
 
-# Template written by -GenerateConfig
-$script:ConfigTemplate = [ordered]@{
-    "_comment"             = "ESET Inspect On-Prem Detection Exporter -- config file. All fields are optional; command-line arguments always override these values."
-    "Server"               = ""
-    "Username"             = ""
-    "EncryptedPassword"    = ""
-    "_passwordComment"     = "Do not edit EncryptedPassword manually. Run the script with -SavePassword to set it."
-    "Domain"               = $false
-    "OutputPath"           = ""
-    "ExportFormat"         = "Both"
-    "DaysBack"             = 0
-    "Filter"               = ""
-    "PageSize"             = 100
-    "FetchDetails"         = $true
-    "FlattenComments"      = $false
-    "DetailDelayMs"        = 50
-    "MaxRetries"           = 3
-    "SkipCertificateCheck" = $true
-}
-
-function Get-ConfigPath {
-    if ($ConfigFile -ne "") { return $ConfigFile }
-    return $script:DefaultConfigPath
-}
-
-function Invoke-GenerateConfig {
-    $path = Get-ConfigPath
-    if ((Test-Path $path) -and -not $Force) {
-        Write-Host "Config file already exists: $path" -ForegroundColor Yellow
-        Write-Host "Use -Force to overwrite it." -ForegroundColor Yellow
-        exit 0
-    }
-    $tmplJson = $script:ConfigTemplate | ConvertTo-Json -Depth 5
-    [System.IO.File]::WriteAllText($path, $tmplJson, [System.Text.Encoding]::UTF8)
-    Write-Host "Config template written to: $path" -ForegroundColor Green
-    Write-Host "Edit the file, then run the script with no arguments." -ForegroundColor Cyan
-    exit 0
-}
-
-function Invoke-SavePassword {
-    # DPAPI is Windows-only
-    if ($PSVersionTable.PSVersion.Major -ge 6 -and $PSVersionTable.Platform -ne "Win32NT") {
-        Write-Host "DPAPI password encryption is only supported on Windows." -ForegroundColor Red
-        Write-Host "On Linux/macOS you will be prompted for your password on each run." -ForegroundColor Yellow
-        exit 1
-    }
-
-    $path = Get-ConfigPath
-
-    # Load existing config or start with template
-    $cfg = if (Test-Path $path) {
-        Get-Content $path -Raw | ConvertFrom-Json
-    } else {
-        $script:ConfigTemplate | ConvertTo-Json -Depth 5 | ConvertFrom-Json
-    }
-
-    Import-DpapiAssembly
-    $secPwd = Read-Host -Prompt "Enter password to encrypt and save" -AsSecureString
-    $bstr   = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($secPwd)
-    $plain  = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr)
-    [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
-
-    if ([string]::IsNullOrWhiteSpace($plain)) {
-        Write-Host "Password cannot be empty." -ForegroundColor Red
-        exit 1
-    }
-
-    # Encrypt with DPAPI (current user scope -- only decryptable by same user on same machine)
-    $bytes     = [System.Text.Encoding]::UTF8.GetBytes($plain)
-    $encrypted = [System.Security.Cryptography.ProtectedData]::Protect(
-        $bytes, $null,
-        [System.Security.Cryptography.DataProtectionScope]::CurrentUser
-    )
-    $encoded = [Convert]::ToBase64String($encrypted)
-
-    # Write back -- preserve all existing keys, just update EncryptedPassword
-    $cfg | Add-Member -MemberType NoteProperty -Name "EncryptedPassword" -Value $encoded -Force
-    $cfgJson = $cfg | ConvertTo-Json -Depth 5
-    [System.IO.File]::WriteAllText($path, $cfgJson, [System.Text.Encoding]::UTF8)
-
-    # Zero plaintext
-    $plain = "x" * $plain.Length; $plain = ""
-
-    Write-Host "Encrypted password saved to: $path" -ForegroundColor Green
-    Write-Host "The password is encrypted with DPAPI and can only be decrypted by this Windows user account on this machine." -ForegroundColor Cyan
-    exit 0
-}
-
-function Read-Config {
-    <#
-    Load the JSON config file and return a hashtable of values.
-    Returns an empty hashtable if the file does not exist.
-    Decrypts EncryptedPassword (DPAPI) if present and populates the Password key.
-    #>
-    $path = Get-ConfigPath
-
-    if (-not (Test-Path $path)) {
-        if ($ConfigFile -ne "") {
-            # User explicitly specified a file that doesn't exist -- warn them
-            Write-Log "Config file not found: $path" "WARN"
-        }
-        return @{}
-    }
-
-    Write-Log "Loading config from: $path"
-
-    $raw = $null
+function loadFile(file) {
+  const reader = new FileReader();
+  reader.onload = e => {
     try {
-        $raw = Get-Content $path -Raw -ErrorAction Stop | ConvertFrom-Json
-    } catch {
-        throw "Failed to parse config file '$path': $_"
+      // Strip UTF-8 BOM if present (PS 5.1 Out-File adds it)
+      let raw = e.target.result.replace(/^﻿/, '');
+      let parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        allData = parsed;
+      } else if (parsed.value && Array.isArray(parsed.value)) {
+        allData = parsed.value;
+      } else {
+        allData = [parsed];
+      }
+      allData = allData.map(d => ({
+        ...d,
+        enabled:    d.enabled === true || d.enabled === 'True' || d.enabled === 'true',
+        isDisabled: d.isDisabled === true || d.isDisabled === 'True' || d.isDisabled === 'true'
+            || !(d.enabled === true || d.enabled === 'True' || d.enabled === 'true'),
+        hasXml:     !!(d.xmlBody && d.xmlBody.trim() !== ''),
+        linkedRules: !!(d.rulesCount > 0 || (d.ruleIds && d.ruleIds.toString().trim() !== '')),
+        ruleCount:  d.rulesCount || d.ruleCount || 0,
+      }));
+      initApp();
+    } catch(err) {
+      alert('Failed to parse JSON file: ' + err.message);
     }
-
-    $cfg = @{}
-
-    # Map each known key from the JSON object into the hashtable.
-    # Use PSObject.Properties -- StrictMode throws if we use $raw.$key on a missing property.
-    foreach ($key in @("Server","Username","Domain","OutputPath","ExportFormat",
-                        "DaysBack","Filter","PageSize","FetchDetails","FlattenComments",
-                        "DetailDelayMs","MaxRetries","SkipCertificateCheck")) {
-        $prop = $raw.PSObject.Properties[$key]
-        if ($null -ne $prop -and $null -ne $prop.Value -and "$($prop.Value)" -ne "") {
-            $cfg[$key] = $prop.Value
-        }
-    }
-
-    # Decrypt password if present -- also use PSObject.Properties for StrictMode safety
-    $encProp = $raw.PSObject.Properties['EncryptedPassword']
-    if ($null -ne $encProp -and -not [string]::IsNullOrWhiteSpace($encProp.Value)) {
-        try {
-            if ($PSVersionTable.PSVersion.Major -ge 6 -and $PSVersionTable.Platform -ne "Win32NT") {
-                Write-Log "EncryptedPassword found in config but DPAPI is not available on this OS. You will be prompted for your password." "WARN"
-            } else {
-                Import-DpapiAssembly
-                $bytes = [Convert]::FromBase64String($encProp.Value)
-                $decrypted = [System.Security.Cryptography.ProtectedData]::Unprotect(
-                    $bytes, $null,
-                    [System.Security.Cryptography.DataProtectionScope]::CurrentUser
-                )
-                $cfg["Password"] = [System.Text.Encoding]::UTF8.GetString($decrypted)
-                Write-Log "Encrypted password loaded from config." "OK"
-            }
-        } catch {
-            Write-Log "Failed to decrypt EncryptedPassword from config (wrong user/machine?): $_" "WARN"
-            Write-Log "You will be prompted for your password interactively." "WARN"
-        }
-    }
-
-    Write-Log "Config loaded. Keys present: $($cfg.Keys -join ', ')" "OK"
-    return $cfg
+  };
+  reader.readAsText(file, 'UTF-8');
 }
 
-function Merge-Config {
-    <#
-    Apply config-file values for any setting the user did NOT explicitly supply on the command line.
-    Then apply built-in defaults for anything still unset.
-
-    "Not supplied" detection:
-        string  -> ""  (empty string is the PowerShell default for optional string params)
-        int     -> -1  (sentinel; 0 is a valid value for DaysBack)
-        bool    -> $null (object type used so we can distinguish "not supplied" from $false)
-    #>
-    param([hashtable]$Cfg)
-
-    # -- Helper: pick first non-null/non-sentinel value from: CLI arg, config, default --
-    function Resolve-Str  { param($cli, $key, $default) if ($cli -ne "")  { $cli } elseif ($Cfg.ContainsKey($key) -and $Cfg[$key] -ne "") { $Cfg[$key] } else { $default } }
-    function Resolve-Int  { param($cli, $key, $default) if ($cli -ne -1)  { $cli } elseif ($Cfg.ContainsKey($key))                        { [int]$Cfg[$key] }   else { $default } }
-    function Resolve-Bool { param($cli, $key, $default) if ($null -ne $cli -and $cli -isnot [string]) { [bool]$cli } elseif ($Cfg.ContainsKey($key)) { [bool]$Cfg[$key] } else { $default } }
-
-    $script:cfg_Server               = Resolve-Str  $Server               "Server"               ""
-    $script:cfg_Username             = Resolve-Str  $Username             "Username"             ""
-    $script:cfg_Password             = Resolve-Str  $Password             "Password"             ""
-    $script:cfg_Domain               = Resolve-Bool $Domain               "Domain"               $false
-    $script:cfg_OutputPath           = Resolve-Str  $OutputPath           "OutputPath"           (Get-Location).Path
-    $script:cfg_ExportFormat         = Resolve-Str  $ExportFormat         "ExportFormat"         "Both"
-    $script:cfg_DaysBack             = Resolve-Int  $DaysBack             "DaysBack"             0
-    $script:cfg_Filter               = Resolve-Str  $Filter               "Filter"               ""
-    $script:cfg_PageSize             = Resolve-Int  $PageSize             "PageSize"             100
-    $script:cfg_FetchDetails         = Resolve-Bool $FetchDetails         "FetchDetails"         $true
-    $script:cfg_DetailDelayMs        = Resolve-Int  $DetailDelayMs        "DetailDelayMs"        50
-    $script:cfg_MaxRetries           = Resolve-Int  $MaxRetries           "MaxRetries"           3
-    $script:cfg_FlattenComments      = Resolve-Bool $FlattenComments      "FlattenComments"      $false
-    $script:cfg_SkipCertificateCheck = Resolve-Bool $SkipCertificateCheck "SkipCertificateCheck" $true
-
-    # Validate ExportFormat after merge (can't use [ValidateSet] on merged value)
-    if ($script:cfg_ExportFormat -notin @("CSV","JSON","Both")) {
-        throw "ExportFormat must be CSV, JSON, or Both. Got: '$($script:cfg_ExportFormat)'"
-    }
-    # Validate PageSize range after merge
-    if ($script:cfg_PageSize -lt 1 -or $script:cfg_PageSize -gt 1000) {
-        throw "PageSize must be between 1 and 1000. Got: $($script:cfg_PageSize)"
-    }
-}
-
-#endregion
-
-#region -- TLS -------------------------------------------------------------------
-
-function Import-DpapiAssembly {
-    # System.Security assembly must be explicitly loaded in PS 5.1
-    # before [System.Security.Cryptography.ProtectedData] can be used.
-    # In PS 6+ it is available automatically but Add-Type is harmless.
+function loadStateFile(file) {
+  const reader = new FileReader();
+  reader.onload = e => {
     try {
-        Add-Type -AssemblyName System.Security -ErrorAction Stop
-    } catch {
-        throw "Could not load System.Security assembly (required for DPAPI password encryption): $_"
+      const raw    = e.target.result.replace(/^﻿/, '');
+      const parsed = JSON.parse(raw);
+      // State file format: { reviewed: { "id": { reviewerName, timestamp, note } } }
+      if (parsed.reviewed && typeof parsed.reviewed === 'object') {
+        // MERGE into current reviewed state -- never replace.
+        // This means multiple state files from different reviewers can be
+        // loaded one after another and all entries are preserved.
+        // If the same exclusion was reviewed by two people, the EARLIER
+        // review is kept (first reviewer wins).
+        let added = 0, skipped = 0;
+        Object.entries(parsed.reviewed).forEach(([id, entry]) => {
+          if (!reviewed[id]) { reviewed[id] = entry; added++; }
+          else skipped++;
+        });
+        // Load notes (standalone notes not tied to reviewed state)
+        if (parsed.notes && typeof parsed.notes === 'object') {
+          Object.entries(parsed.notes).forEach(([id, text]) => {
+            if (!notes[id]) notes[id] = text;
+          });
+        }
+        // Also extract inline notes from reviewed entries
+        Object.entries(parsed.reviewed).forEach(([id, entry]) => {
+          if (entry.note && !notes[id]) notes[id] = entry.note;
+        });
+        // Restore flagged items -- merge with existing
+        if (Array.isArray(parsed.flagged)) {
+          parsed.flagged.forEach(id => flagged.add(String(id)));
+        }
+        stateLoaded = true;
+        const total      = Object.keys(reviewed).length;
+        const totalFlags = flagged.size;
+        document.getElementById('stateFileHint').textContent =
+          `State merged: ${total} reviewed, ${totalFlags} flagged (${added} new reviews added)`;
+        document.getElementById('stateDropBox').style.borderColor = 'var(--green)';
+        document.getElementById('stateDropBox').style.borderStyle = 'solid';
+        // If app already open, refresh
+        if (app.style.display !== 'none') { updateStats(); applyFilters(); }
+      } else {
+        alert('Not a valid review state file. Expected { "reviewed": { ... } }');
+      }
+    } catch(err) {
+      alert('Failed to parse state file: ' + err.message);
     }
+  };
+  reader.readAsText(file, 'UTF-8');
 }
 
-function Enable-TlsBypass {
-    if ($PSVersionTable.PSVersion.Major -lt 6) {
-        if (-not ([System.Management.Automation.PSTypeName]"EsetTrustAll").Type) {
-            Add-Type -TypeDefinition @"
-using System.Net;
-using System.Security.Cryptography.X509Certificates;
-public class EsetTrustAll : ICertificatePolicy {
-    public bool CheckValidationResult(
-        ServicePoint sp, X509Certificate cert, WebRequest req, int problem) { return true; }
-}
-"@
-        }
-        [System.Net.ServicePointManager]::CertificatePolicy = New-Object EsetTrustAll
-    }
-    $needed = [System.Net.SecurityProtocolType]::Tls12
-    if (-not ([System.Net.ServicePointManager]::SecurityProtocol -band $needed)) {
-        [System.Net.ServicePointManager]::SecurityProtocol =
-            [System.Net.ServicePointManager]::SecurityProtocol -bor $needed
-    }
+function initApp() {
+  flagged.clear();
+  currentFilter = 'all';
+  currentIndex  = 0;
+  document.getElementById('searchInput').value = '';
+  setFilter('all');
+  dropzone.style.display = 'none';
+  app.style.display = 'flex';
+  updateStats();
 }
 
-#endregion
-
-#region -- Pre-flight ------------------------------------------------------------
-
-function Test-ServerReachable {
-    param([string]$Hostname)
-    Write-Log "Pre-flight: DNS resolution for '$Hostname'..."
-    try {
-        $addrs = [System.Net.Dns]::GetHostAddresses($Hostname) |
-                 Select-Object -ExpandProperty IPAddressToString
-        Write-Log "  DNS OK -> $($addrs -join ', ')" "OK"
-    } catch {
-        Write-Log "DNS resolution failed for '$Hostname': $_" "ERROR"
-        return $false
-    }
-    Write-Log "Pre-flight: TCP port 443 connectivity test..."
-    try {
-        $tcp   = New-Object System.Net.Sockets.TcpClient
-        $async = $tcp.BeginConnect($Hostname, 443, $null, $null)
-        $ok    = $async.AsyncWaitHandle.WaitOne(5000)
-        $tcp.Close()
-        if (-not $ok) {
-            Write-Log "TCP 443 connection to '$Hostname' timed out (5 s)." "ERROR"
-            return $false
-        }
-        Write-Log "  TCP 443 OK." "OK"
-        return $true
-    } catch {
-        Write-Log "TCP 443 connectivity test failed: $_" "ERROR"
-        return $false
-    }
+function resetApp() {
+  allData = []; filteredData = []; flagged.clear();
+  // Keep reviewed state, notes and reviewer name across sessions
+  app.style.display = 'none';
+  dropzone.style.display = 'flex';
+  fileInput.value = '';
+  stateFileInput.value = '';
 }
 
-function Test-FilterSyntax {
-    param([string]$F)
-    if (-not $F) { return }
-    $allowedFields = @("id", "resolved", "creationTime")
-    $allowedOps    = @("eq", "ne", "gt", "ge", "lt", "le", "and", "or", "not", "true", "false")
-    $tokens        = [regex]::Matches($F, '[a-zA-Z]+') | ForEach-Object { $_.Value }
-    $unknowns      = $tokens | Where-Object { $_ -notin $allowedOps -and $_ -notin $allowedFields }
-    if ($unknowns) {
-        Write-Log ("Filter pre-validation WARNING: unrecognised token(s): " +
-                   "'$($unknowns -join "', '")'." +
-                   " Allowed filter fields: $($allowedFields -join ', ')." +
-                   " Proceeding -- the server will reject an invalid expression.") "WARN"
-    } else {
-        Write-Log "Filter expression pre-validation passed." "OK"
+// ============================================================
+// FILTERING
+// ============================================================
+function setFilter(f) {
+  currentFilter = f;
+  ['all','pending','reviewed','enabled','disabled','flagged','norules'].forEach(k => {
+    const id  = 'filter' + k.charAt(0).toUpperCase() + k.slice(1);
+    const btn = document.getElementById(id);
+    if (!btn) return;
+    btn.classList.remove('active','active-red','active-yellow','active-green');
+    if (k === f) {
+      if (k === 'disabled')  btn.classList.add('active-red');
+      else if (k === 'flagged') btn.classList.add('active-yellow');
+      else if (k === 'reviewed') btn.classList.add('active-green');
+      else btn.classList.add('active');
     }
+  });
+  applyFilters();
 }
 
-function Assert-OutputWritable {
-    param([string]$Dir)
-    if (-not (Test-Path $Dir)) {
-        Write-Log "Output directory does not exist -- creating: $Dir"
-        try {
-            New-Item -ItemType Directory -Path $Dir -Force | Out-Null
-            Write-Log "Directory created." "OK"
-        } catch {
-            throw "Failed to create output directory '$Dir': $_"
-        }
+function applyFilters() {
+  const q = document.getElementById('searchInput').value.toLowerCase().trim();
+  filteredData = allData.filter(d => {
+    const isRev = !!reviewed[String(d.id)];
+    if (currentFilter === 'pending'   && isRev)                           return false;
+    if (currentFilter === 'reviewed'  && !isRev)                          return false;
+    if (currentFilter === 'enabled'   && d.isDisabled)                    return false;
+    if (currentFilter === 'disabled'  && !d.isDisabled)                   return false;
+    if (currentFilter === 'flagged'   && !flagged.has(String(d.id)))      return false;
+    if (currentFilter === 'norules'   && d.linkedRules)                   return false;
+    if (q) {
+      const haystack = [d.name, d.note, d.ruleIds, d.ruleUuids, d.uuid,
+                        d.xmlBody, d.author, d.targets, d.ruleName]
+        .filter(Boolean).join(' ').toLowerCase();
+      if (!haystack.includes(q)) return false;
     }
-    $probe = Join-Path $Dir ".eset_write_probe_$PID"
-    try {
-        [System.IO.File]::WriteAllText($probe, "ok")
-        Remove-Item $probe -Force -ErrorAction SilentlyContinue
-        Write-Log "Output directory is writable: $Dir" "OK"
-    } catch {
-        throw "Output directory '$Dir' is not writable. Check permissions. Error: $_"
-    }
+    return true;
+  });
+
+  currentIndex = 0;
+  renderSidebar();
+  if (filteredData.length > 0) renderDetail(0);
+  else document.getElementById('detailPanel').innerHTML = `
+    <div class="detail-empty">
+      <div class="detail-empty-icon">&#128269;</div>
+      <div class="detail-empty-text">No exclusions match the current filter</div>
+    </div>`;
 }
 
-#endregion
-
-#region -- API core (with retry) -------------------------------------------------
-
-function New-ApiSplat {
-    param([string]$Uri, [string]$Method = "GET", [hashtable]$Headers = @{}, [object]$Body = $null)
-    $s = @{
-        Uri             = $Uri
-        Method          = $Method
-        Headers         = $Headers
-        ContentType     = "application/json"
-        UseBasicParsing = $true
-    }
-    if ($null -ne $Body) { $s["Body"] = ($Body | ConvertTo-Json -Depth 10 -Compress) }
-    if ($script:cfg_SkipCertificateCheck -and $PSVersionTable.PSVersion.Major -ge 6) {
-        $s["SkipCertificateCheck"] = $true
-    }
-    return $s
+// ============================================================
+// SIDEBAR
+// ============================================================
+function renderSidebar() {
+  const list = document.getElementById('sidebarList');
+  if (filteredData.length === 0) {
+    list.innerHTML = '<li class="no-results">No results</li>';
+    return;
+  }
+  list.innerHTML = filteredData.map((d, i) => {
+    const isFlagged  = flagged.has(String(d.id));
+    const isRev      = !!reviewed[String(d.id)];
+    const statusBadge = d.isDisabled
+      ? '<span class="badge badge-disabled">DISABLED</span>'
+      : '<span class="badge badge-enabled">ENABLED</span>';
+    const ruleBadge  = d.linkedRules
+      ? `<span class="badge badge-rules">${d.ruleCount} rule${d.ruleCount !== 1 ? 's' : ''}</span>`
+      : '';
+    const flagBadge  = isFlagged ? '<span class="badge badge-flag">&#9873;</span>' : '';
+    const revBadge   = isRev ? '<span class="badge badge-reviewed">&#10003;</span>' : '';
+    const noteBadge  = notes[String(d.id)] ? '<span class="badge" style="background:rgba(124,58,237,0.15);color:var(--accent2)">&#128221;</span>' : '';
+    const xmlBadge   = !d.hasXml ? '<span class="badge badge-noxml">no XML</span>' : '';
+    return `<li class="sidebar-item${i === currentIndex ? ' active' : ''}${isFlagged ? ' flagged-item' : ''}${isRev ? ' reviewed-item' : ''}"
+               onclick="selectItem(${i})">
+      <div class="item-name" title="${esc(d.name || '(unnamed)')}">${esc(d.name || '(unnamed)')}</div>
+      <div class="item-meta">${statusBadge}${ruleBadge}${revBadge}${noteBadge}${flagBadge}${xmlBadge}</div>
+    </li>`;
+  }).join('');
 }
 
-function Invoke-ApiCall {
-    param([string]$Uri, [string]$Method = "GET", [hashtable]$Headers = @{}, [object]$Body = $null)
-    $attempt = 0
-    while ($true) {
-        $attempt++
-        try {
-            $splat = New-ApiSplat -Uri $Uri -Method $Method -Headers $Headers -Body $Body
-            return Invoke-RestMethod @splat
-        } catch [System.Net.WebException] {
-            $webEx    = $_.Exception
-            $response = $webEx.Response
-            $status   = if ($response) { [int]$response.StatusCode } else { 0 }
-            $body     = ""
-            if ($response) {
-                try {
-                    $sr   = New-Object System.IO.StreamReader($response.GetResponseStream())
-                    $body = $sr.ReadToEnd(); $sr.Close()
-                } catch { }
-            }
-            $isRetryable = ($status -eq 429) -or ($status -ge 500) -or ($status -eq 0)
-            if (-not $isRetryable -or $attempt -ge $script:cfg_MaxRetries) {
-                $msg = "API call failed (HTTP $status) -- URI: $Uri"
-                if ($body) { $msg += "`n  Server response: $body" }
-                throw $msg
-            }
-            $retryAfterMs = 0
-            if ($response -and $response.Headers["Retry-After"]) {
-                $ra = 0
-                if ([int]::TryParse($response.Headers["Retry-After"], [ref]$ra)) { $retryAfterMs = $ra * 1000 }
-            }
-            $backoffMs = [int][Math]::Max($retryAfterMs, ([Math]::Pow(2, $attempt - 1) * 1000))
-            Write-Log "  Attempt $attempt/$($script:cfg_MaxRetries) failed (HTTP $status). Retrying in ${backoffMs}ms..." "WARN"
-            Start-Sleep -Milliseconds $backoffMs
-        } catch {
-            if ($attempt -ge $script:cfg_MaxRetries) { throw }
-            $backoffMs = [int]([Math]::Pow(2, $attempt - 1) * 1000)
-            Write-Log "  Attempt $attempt/$($script:cfg_MaxRetries) error: $_. Retrying in ${backoffMs}ms..." "WARN"
-            Start-Sleep -Milliseconds $backoffMs
-        }
-    }
+function selectItem(i) {
+  currentIndex = i;
+  renderSidebar();
+  renderDetail(i);
+  const items = document.querySelectorAll('.sidebar-item');
+  if (items[i]) items[i].scrollIntoView({ block: 'nearest' });
 }
 
-#endregion
+// ============================================================
+// DETAIL PANEL
+// ============================================================
+function renderDetail(i) {
+  const d = filteredData[i];
+  if (!d) return;
 
-#region -- Authentication --------------------------------------------------------
+  const isFlagged = flagged.has(String(d.id));
+  const revEntry  = reviewed[String(d.id)];
+  const isRev     = !!revEntry;
+  const hasNote   = !!(notes[String(d.id)] && notes[String(d.id)].trim());
 
-function Invoke-Authenticate {
-    param([string]$Pwd)
-    $splat = New-ApiSplat -Uri "https://$($script:cfg_Server)/api/v1/authenticate" -Method "PUT"
-    $splat["Body"] = (@{ username = $script:cfg_Username; password = $Pwd; domain = $script:cfg_Domain } | ConvertTo-Json)
-    $resp = $null
-    try {
-        $resp = Invoke-WebRequest @splat
-    } catch [System.Net.WebException] {
-        $status  = 0
-        $errBody = ""
-        if ($_.Exception.Response) {
-            $status = [int]$_.Exception.Response.StatusCode
-            try {
-                $sr      = New-Object System.IO.StreamReader($_.Exception.Response.GetResponseStream())
-                $errBody = $sr.ReadToEnd(); $sr.Close()
-            } catch { }
-        }
-        $hint = switch ($status) {
-            401     { "Invalid username or password. Verify credentials and account status." }
-            403     { "Account lacks API access. Check ESET Inspect user role/permissions." }
-            404     { "Authentication endpoint not found (HTTP 404). Verify server address and that ESET Inspect is running on port 443." }
-            0       { "No response received. Check hostname, firewall rules, and that the ESET Inspect service is running." }
-            default { "Unexpected HTTP $status during authentication." }
-        }
-        $msg = "Authentication FAILED: $hint"
-        if ($errBody) { $msg += " | Server said: $errBody" }
-        throw $msg
-    } catch {
-        throw "Authentication FAILED (unexpected error): $_"
-    }
+  const statusBadge = d.isDisabled
+    ? '<span class="badge badge-disabled" style="font-size:13px;padding:4px 10px">DISABLED</span>'
+    : '<span class="badge badge-enabled"  style="font-size:13px;padding:4px 10px">ENABLED</span>';
 
-    if ($resp.StatusCode -ne 200) {
-        throw "Authentication returned HTTP $($resp.StatusCode) -- expected 200."
-    }
+  // Reviewed status block
+  const reviewedHtml = isRev
+    ? `<div class="review-card">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+          <div>
+            <span class="review-by">&#10003; Reviewed by ${esc(revEntry.reviewerName)}</span>
+            &nbsp;&nbsp;
+            <span class="review-time">${esc(new Date(revEntry.timestamp).toLocaleString())}</span>
+          </div>
+          <button class="unmark-btn" onclick="unmarkReviewed('${d.id}')">&#8617; Mark as Pending</button>
+        </div>
+        ${(notes[String(d.id)] || revEntry.note) ? `<div class="review-note">${esc(notes[String(d.id)] || revEntry.note)}</div>` : ''}
+      </div>`
+    : '';
 
-    $token = $null
-    try {
-        $token = $resp.Headers["X-Security-Token"]
-        if ($token -is [System.Object[]]) { $token = $token[0] }
-    } catch { }
+  // Rules section
+  const ruleIdsArr   = d.ruleIds   ? d.ruleIds.toString().split(',').map(x => x.trim()).filter(Boolean) : [];
+  const ruleUuidsArr = d.ruleUuids ? d.ruleUuids.toString().split(',').map(x => x.trim()).filter(Boolean) : [];
+  const ruleNamesArr = d.ruleName  ? d.ruleName.toString().split(';').map(x => x.trim()).filter(Boolean) : [];
+  const rulesHtml = ruleIdsArr.length > 0
+    ? ruleIdsArr.map((id, idx) => {
+        const name = ruleNamesArr[idx] ? `<div style="font-size:11px;color:var(--muted);margin-top:2px">${esc(ruleNamesArr[idx])}</div>` : '';
+        return `<div class="rule-chip" style="display:flex;flex-direction:column">Rule ID: ${esc(id)}${name}</div>`;
+      }).join('')
+    : (d.rulesCount > 0
+        ? `<span class="rule-chip">${d.rulesCount} rule${d.rulesCount!==1?'s':''} (IDs not available in this export)</span>`
+        : '<span style="color:var(--muted);font-size:13px;font-style:italic">Not linked to any rule (global exclusion)</span>');
 
-    if ([string]::IsNullOrWhiteSpace($token)) {
-        throw ("Authentication returned HTTP 200, but the X-Security-Token header is absent. " +
-               "A proxy may be stripping headers, or the API path is incorrect.")
-    }
-    if ($token.Length -lt 16) {
-        throw "X-Security-Token appears too short (length=$($token.Length)). Value: '$token'"
-    }
+  // XML
+  const xmlHtml = d.hasXml
+    ? `<div class="xml-wrap">
+        <div class="xml-toolbar">
+          <span class="xml-toolbar-label">XML Criteria Body</span>
+          <button class="copy-btn" id="copyBtn" onclick="copyXml()">Copy XML</button>
+        </div>
+        <div class="xml-code" id="xmlCode">${highlightXml(d.xmlBody)}</div>
+       </div>`
+    : `<div class="xml-wrap">
+        <div class="xml-toolbar"><span class="xml-toolbar-label">XML Criteria Body</span></div>
+        <div class="xml-empty">No XML body &mdash; this is a standard criteria exclusion or was exported without -FetchDetails</div>
+       </div>`;
 
-    Write-Log "Authentication SUCCESS -- session token received (length=$($token.Length))." "OK"
-    $script:AuthTime = Get-Date
-    return $token
+  document.getElementById('detailPanel').innerHTML = `
+    <div class="detail-nav">
+      <button class="nav-btn" onclick="navigate(-1)" ${i === 0 ? 'disabled' : ''}>&larr; Prev</button>
+      <span class="nav-counter">${i + 1} / ${filteredData.length}</span>
+      <button class="nav-btn" onclick="navigate(1)" ${i === filteredData.length - 1 ? 'disabled' : ''}>Next &rarr;</button>
+      <div style="flex:1"></div>
+      <button class="mark-reviewed-btn${isRev ? ' done' : ''}" onclick="markReviewed('${d.id}')">
+        ${isRev ? '&#10003; Reviewed' : '&#10003; Mark as Reviewed'}
+      </button>
+      <button class="note-btn${hasNote ? ' has-note' : ''}" onclick="toggleNotePanel('${d.id}')" title="Add or edit a note">
+        &#128221; ${hasNote ? 'Edit Note' : 'Add Note'}
+      </button>
+      <button class="flag-btn${isFlagged ? ' flagged' : ''}" onclick="toggleFlag('${d.id}')">
+        &#9873; ${isFlagged ? 'Unflag' : 'Flag'}
+      </button>
+    </div>
+
+    ${reviewedHtml}
+
+    <div class="note-panel" id="notePanel">
+      <div class="note-panel-label">&#128221; Note</div>
+      <textarea class="note-textarea" id="noteTextarea" placeholder="Add a note about this exclusion..." rows="4">${hasNote ? esc(getNoteForId('${d.id}')) : ''}</textarea>
+      <div class="note-panel-actions">
+        <button class="note-save-btn" onclick="saveNote('${d.id}')">Save Note</button>
+        <button class="note-clear-btn" onclick="clearNote('${d.id}')">Clear</button>
+        <button class="note-clear-btn" onclick="toggleNotePanel('${d.id}')">Cancel</button>
+      </div>
+    </div>
+
+    <div class="detail-header">
+      <div class="detail-title">${esc(d.name || '(unnamed)')}</div>
+      <div class="detail-badges">${statusBadge}</div>
+    </div>
+
+    <div class="fields-grid">
+      <div class="field-card">
+        <div class="field-label">ID</div>
+        <div class="field-value">${esc(String(d.id ?? ''))}</div>
+      </div>
+      <div class="field-card">
+        <div class="field-label">Author</div>
+        <div class="field-value ${d.author && d.author.trim() ? '' : 'empty'}">${d.author && d.author.trim() ? esc(d.author) : 'n/a'}</div>
+      </div>
+      <div class="field-card">
+        <div class="field-label">Created</div>
+        <div class="field-value ${d.timestamp ? '' : 'empty'}">${d.timestamp ? esc(new Date(d.timestamp).toLocaleString()) : 'n/a'}</div>
+      </div>
+      <div class="field-card">
+        <div class="field-label">Access Group</div>
+        <div class="field-value ${d.accessGroup ? '' : 'empty'}">${d.accessGroup ? esc(d.accessGroup) : 'n/a'}</div>
+      </div>
+      <div class="field-card">
+        <div class="field-label">Type</div>
+        <div class="field-value" style="color:${d.isAdvanced ? 'var(--accent2)' : 'var(--accent)'}">${d.isAdvanced ? 'Advanced (XML Query)' : 'Standard (Criteria)'}</div>
+      </div>
+      <div class="field-card">
+        <div class="field-label">Internal (ESET)</div>
+        <div class="field-value" style="color:${d.isInternal ? 'var(--yellow)' : 'var(--green)'}">${d.isInternal ? 'Yes' : 'No'}</div>
+      </div>
+      <div class="field-card">
+        <div class="field-label">Hit Count</div>
+        <div class="field-value ${d.hitCount ? '' : 'empty'}">${d.hitCount ?? 0}</div>
+      </div>
+      <div class="field-card">
+        <div class="field-label">Linked Rules</div>
+        <div class="field-value" style="color:${d.linkedRules ? 'var(--accent)' : 'var(--muted)'}">${d.ruleCount || 0} rule${d.ruleCount !== 1 ? 's' : ''}</div>
+      </div>
+      <div class="field-card">
+        <div class="field-label">Has XML Body</div>
+        <div class="field-value" style="color:${d.hasXml ? 'var(--green)' : 'var(--muted)'}">${d.hasXml ? 'Yes' : 'No'}</div>
+      </div>
+      <div class="field-card">
+        <div class="field-label">UUID</div>
+        <div class="field-value" style="font-size:11px">${esc(d.uuid ?? '')}</div>
+      </div>
+    </div>
+
+    <div class="section-label">Note</div>
+    <div class="note-block${!d.note || d.note.trim() === '' ? ' empty' : ''}">${d.note && d.note.trim() !== '' ? esc(d.note) : 'No note set'}</div>
+
+    <div class="section-label">Targets</div>
+    <div class="note-block${!d.targets || d.targets.trim() === '' || d.targets === 'All' ? ' empty' : ''}" style="margin-bottom:24px">
+      ${d.targets && d.targets.trim() && d.targets !== 'All'
+        ? esc(d.targets).replace(/,\s*/g, '<br>')
+        : (d.targets === 'All' ? 'All computers' : 'No specific targets defined')}
+    </div>
+
+    <div class="section-label">Criteria Summary</div>
+    <div class="fields-grid" style="margin-bottom:24px">
+      ${[['Files', d.criteriaFiles], ['Paths', d.criteriaPaths], ['CMD Lines', d.criteriaCmdLine],
+         ['Signers', d.criteriaSigners], ['Hashes', d.criteriaHashes], ['Users', d.criteriaUsers]]
+        .map(([l,v]) => `<div class="field-card">
+          <div class="field-label">${l}</div>
+          <div class="field-value ${v ? '' : 'empty'}">${v || 0}</div>
+        </div>`).join('')}
+    </div>
+
+    <div class="section-label">Linked Rules</div>
+    <div class="rules-block">${rulesHtml}</div>
+
+    ${xmlHtml}
+  `;
 }
 
-function Test-TokenAge {
-    if ($null -ne $script:AuthTime -and ((Get-Date) - $script:AuthTime).TotalMinutes -gt 20) {
-        Write-Log "Session token is over 20 minutes old. If you see HTTP 401 errors, re-run the script." "WARN"
-        $script:AuthTime = Get-Date
-    }
+// ============================================================
+// REVIEW STATE
+// ============================================================
+function markReviewed(id) {
+  id = String(id);
+  if (reviewed[id]) { unmarkReviewed(id); return; }
+
+  reviewed[id] = {
+    reviewerName: reviewerName || 'Unknown',
+    timestamp:    new Date().toISOString(),
+    note:         (notes[id] || '').trim(),  // use note if already written
+    exclusionId:  id,
+  };
+  updateStats();
+  renderSidebar();
+  renderDetail(currentIndex);
+  // Auto-advance to next unreviewed item
+  const next = filteredData.slice(currentIndex + 1).findIndex(x => !reviewed[String(x.id)]);
+  if (next !== -1) selectItem(currentIndex + 1 + next);
 }
 
-#endregion
-
-#region -- Detection helpers -----------------------------------------------------
-
-$script:DetectionTypeMap = @{
-    0 = "UnknownAlarm";    1 = "RuleActivated";        2 = "MalwareFoundOnDisk"
-    3 = "MalwareFoundInMemory"; 4 = "ExploitDetected"; 5 = "FirewallDetection"
-    7 = "BlockedAddress";  8 = "CryptoBlockerDetection"
-}
-$script:SignatureTypeMap = @{ 90 = "Trusted"; 80 = "Valid"; 75 = "AdHoc"; 70 = "None"; 60 = "Invalid" }
-
-function Get-SeverityLabel([int]$Score) {
-    if ($Score -ge 70) { return "Threat" }
-    if ($Score -ge 40) { return "Warning" }
-    return "Info"
+function unmarkReviewed(id) {
+  id = String(id);
+  delete reviewed[id];
+  updateStats();
+  renderSidebar();
+  renderDetail(currentIndex);
 }
 
-function Get-Prop {
-    <#
-    .SYNOPSIS
-        Safely read a property from a PSCustomObject under Set-StrictMode -Version Latest.
-    .DESCRIPTION
-        StrictMode throws a PropertyNotFoundException when accessing a missing property.
-        The ESET API does not guarantee every field is present in every response -- fields
-        vary by detection type and between the list and detail endpoints.
-        Returns $Default ($null unless overridden) for any absent or null property.
-    #>
-    param([PSCustomObject]$Obj, [string]$Name, $Default = $null)
-    if ($null -eq $Obj) { return $Default }
-    $prop = $Obj.PSObject.Properties[$Name]
-    if ($null -eq $prop) { return $Default }
-    $v = $prop.Value
-    if ($null -eq $v) { return $Default }
-    return $v
+function getNoteForId(id) {
+  return notes[String(id)] || '';
 }
 
-function Resolve-DetectionObject {
-    <#
-    .SYNOPSIS
-        Unwrap the detection object returned by the API.
-    .DESCRIPTION
-        The list endpoint   (GET /detections)    returns each detection as a flat object.
-        The detail endpoint (GET /detections/id) wraps the detection inside a "DETECTION"
-        property: { "DETECTION": { ...fields... } }
-        This function unwraps the detail response automatically so ConvertTo-FlatDetection
-        always receives a flat detection object regardless of which endpoint produced it.
-    #>
-    param([PSCustomObject]$Raw)
-    if ($null -eq $Raw) { return $null }
-    $wrapper = $Raw.PSObject.Properties['DETECTION']
-    if ($null -ne $wrapper -and $null -ne $wrapper.Value) {
-        return $wrapper.Value   # detail endpoint -- unwrap
-    }
-    return $Raw                 # list endpoint -- already flat
+function toggleNotePanel(id) {
+  const panel = document.getElementById('notePanel');
+  if (!panel) return;
+  const isOpen = panel.classList.contains('open');
+  if (isOpen) {
+    panel.classList.remove('open');
+  } else {
+    // Pre-fill textarea with existing note
+    const ta = document.getElementById('noteTextarea');
+    if (ta) ta.value = notes[String(id)] || '';
+    panel.classList.add('open');
+    if (ta) ta.focus();
+  }
 }
 
-function ConvertTo-FlatDetection {
-    param([PSCustomObject]$Raw, [hashtable]$Comments = @{ text = ""; array = @() })
-
-    # Unwrap detail-endpoint wrapper if present
-    $D = Resolve-DetectionObject $Raw
-
-    # Numeric fields -- coerce safely; missing or non-numeric becomes sentinel default
-    $typeId  = try { [int](Get-Prop $D 'type'               -1) } catch { -1 }
-    $sigType = try { [int](Get-Prop $D 'moduleSignatureType' -1) } catch { -1 }
-    $score   = try { [int](Get-Prop $D 'severityScore'        0) } catch {  0 }
-    $handled = try { [int](Get-Prop $D 'handled'              0) } catch {  0 }
-
-    # Resolve computerIp BEFORE the hashtable -- PS cannot parse try/catch as hash values.
-    # The API returns computerIp in two different shapes depending on endpoint:
-    #   List endpoint   : single PSCustomObject { ipv4Addresses=[]; ipv6Addresses=[]; macAddress="" }
-    #   Detail endpoint : System.Object[] where each element is a PSCustomObject { ipv4Addresses=[]; ... }
-    # We normalise both into a single object to extract from.
-    $ipObj = Get-Prop $D 'computerIp'
-    # IP diagnostic -- runs once per script execution, remove after confirming correct output
-    if (-not $script:IpDiagWritten) {
-        $script:IpDiagWritten = $true
-        # Log computerIp shape
-        if ($null -ne $ipObj) {
-            Write-Log "IP DIAG: computerIp type=[$($ipObj.GetType().FullName)]  value=$($ipObj | ConvertTo-Json -Depth 3 -Compress)" "DEBUG"
-        } else {
-            Write-Log "IP DIAG: computerIp is null" "DEBUG"
-        }
-        # Log ALL raw property names so we can spot tags and any other undocumented fields
-        Write-Log "RAW PROPS: $($D.PSObject.Properties.Name -join ', ')" "DEBUG"
-        # Log full value of any property whose name contains 'tag' (case-insensitive)
-        $D.PSObject.Properties | Where-Object { $_.Name -match '(?i)tag' } | ForEach-Object {
-            Write-Log "TAG FIELD: [$($_.Name)] type=[$($_.Value.GetType().FullName)]  value=$($_.Value | ConvertTo-Json -Depth 3 -Compress)" "DEBUG"
-        }
-    }
-    $ipNorm = try {
-        if ($null -eq $ipObj) { $null }
-        elseif ($ipObj -is [System.Object[]] -and $ipObj.Count -gt 0) { $ipObj[0] }  # detail: unwrap array
-        elseif ($ipObj -is [System.Collections.IList] -and $ipObj.Count -gt 0) { $ipObj[0] }
-        else { $ipObj }  # list: already a flat object
-    } catch { $null }
-
-    $ipv4 = try {
-        if ($null -eq $ipNorm) { $null }
-        elseif ($ipNorm -is [string]) { $ipNorm }
-        else {
-            $arr = $ipNorm.PSObject.Properties['ipv4Addresses']
-            if ($arr -and $arr.Value) { @($arr.Value) -join ', ' } else { $null }
-        }
-    } catch { $null }
-    $ipv6 = try {
-        if ($null -eq $ipNorm -or $ipNorm -is [string]) { $null }
-        else {
-            $arr = $ipNorm.PSObject.Properties['ipv6Addresses']
-            if ($arr -and $arr.Value) { @($arr.Value) -join ', ' } else { $null }
-        }
-    } catch { $null }
-    $mac  = try {
-        if ($null -eq $ipNorm -or $ipNorm -is [string]) { $null }
-        else {
-            $m = $ipNorm.PSObject.Properties['macAddress']
-            if ($m -and $m.Value) { $m.Value } else { $null }
-        }
-    } catch { $null }
-
-    $flat = [PSCustomObject]@{
-        id                        = Get-Prop $D 'id'
-        uuid                      = Get-Prop $D 'uuid'
-        creationTime              = Get-Prop $D 'creationTime'
-        moduleFirstSeenLocally    = Get-Prop $D 'moduleFirstSeenLocally'
-        moduleLastExecutedLocally = Get-Prop $D 'moduleLastExecutedLocally'
-
-        # -- Computer ----------------------------------------------------------
-        computerId                = Get-Prop $D 'computerId'
-        computerName              = Get-Prop $D 'computerName'
-        computerUuid              = Get-Prop $D 'computerUuid'
-        computerIpv4              = $ipv4
-        computerIpv6              = $ipv6
-        computerMac               = $mac
-        ruleId                    = Get-Prop $D 'ruleId'
-        ruleUuid                  = Get-Prop $D 'ruleUuid'
-        ruleName                  = Get-Prop $D 'ruleName'
-        type                      = $typeId
-        typeLabel                 = if ($script:DetectionTypeMap.ContainsKey($typeId)) { $script:DetectionTypeMap[$typeId] } else { "Unknown($typeId)" }
-        severity                  = Get-Prop $D 'severity'
-        severityScore             = $score
-        severityLabel             = Get-SeverityLabel $score
-        priority                  = Get-Prop $D 'priority'
-        resolved                  = Get-Prop $D 'resolved'
-        autoResolved              = Get-Prop $D 'autoResolved'
-        resolvedOccurrences       = Get-Prop $D 'resolvedOccurrences'
-        handled                   = $handled
-        occurrenceCount           = Get-Prop $D 'occurrenceCount'
-        occurrences               = Get-Prop $D 'occurrences'
-        threatName                = Get-Prop $D 'threatName'
-        threatUri                 = Get-Prop $D 'threatUri'
-        processId                 = Get-Prop $D 'processId'
-        processUuid               = Get-Prop $D 'processUuid'
-        processEpxUuid            = Get-Prop $D 'processEpxUuid'
-        processName               = Get-Prop $D 'processName'
-        processUser               = Get-Prop $D 'processUser'
-        processCommandLine        = Get-Prop $D 'processCommandLine'
-        processPath               = Get-Prop $D 'processPath'
-        parentProcessName         = Get-Prop $D 'parentProcessName'
-        moduleId                  = Get-Prop $D 'moduleId'
-        moduleUuid                = Get-Prop $D 'moduleUuid'
-        moduleName                = Get-Prop $D 'moduleName'
-        moduleSha1                = Get-Prop $D 'moduleSha1'
-        moduleSha256              = Get-Prop $D 'moduleSha256'
-        moduleSigner              = Get-Prop $D 'moduleSigner'
-        moduleSignatureType       = $sigType
-        moduleSignatureLabel      = if ($script:SignatureTypeMap.ContainsKey($sigType)) { $script:SignatureTypeMap[$sigType] } else { "Unknown($sigType)" }
-        moduleLgAge               = Get-Prop $D 'moduleLgAge'
-        moduleLgPopularity        = Get-Prop $D 'moduleLgPopularity'
-        moduleLgReputation        = Get-Prop $D 'moduleLgReputation'
-        # Note: use "" default (not $null) so an intentionally blank note is preserved
-        note                      = (Get-Prop $D 'note' "")
-        commentsText              = $Comments.text
-        commentsArray             = $Comments.array
-        event                     = Get-Prop $D 'event'
-    }
-
-    # If any mapped field is null/empty, write a one-time human-readable debug file.
-    # Fields that are EXPECTED to sometimes be empty (e.g. note, ruleName on malware
-    # detections) are excluded from the null check to avoid noise.
-    $expectedEmpty = @('note','ruleName','ruleId','ruleUuid','processCommandLine',
-                       'parentProcessName','threatUri','moduleSigner','event',
-                       'processEpxUuid','computerIpv6','commentsText','commentsArray')
-
-    if (-not $script:NullDebugWritten) {
-        $nullFields = $flat.PSObject.Properties |
-            Where-Object { ($null -eq $_.Value -or "$($_.Value)" -eq "") -and
-                           ($_.Name -notin $expectedEmpty) } |
-            Select-Object -ExpandProperty Name
-
-        if ($nullFields) {
-            $script:NullDebugWritten = $true
-            $debugPath = Join-Path $script:cfg_OutputPath "ESET_NullFields_Debug_$(Get-Date -Format 'yyyyMMdd_HHmmss').txt"
-            try {
-                $lines = [System.Collections.Generic.List[string]]::new()
-                $lines.Add("=" * 70)
-                $lines.Add("ESET Inspect -- Null Field Debug Report")
-                $lines.Add("Generated : $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')")
-                $lines.Add("Detection : id=$(Get-Prop $D 'id')  uuid=$(Get-Prop $D 'uuid')")
-                $lines.Add("=" * 70)
-                $lines.Add("")
-                $lines.Add("The following mapped fields were null or empty on this detection.")
-                $lines.Add("If a field you expect is missing, paste the MAPPED VALUES and")
-                $lines.Add("RAW API PROPERTIES sections below into chat for investigation.")
-                $lines.Add("")
-                $lines.Add("FIELDS THAT WERE NULL: $($nullFields -join ', ')")
-                $lines.Add("")
-                $lines.Add("-" * 70)
-                $lines.Add("MAPPED VALUES (all exported fields for this detection):")
-                $lines.Add("-" * 70)
-                foreach ($p in $flat.PSObject.Properties) {
-                    $lines.Add("  $($p.Name.PadRight(30)) = $($p.Value)")
-                }
-                $lines.Add("")
-                $lines.Add("-" * 70)
-                $lines.Add("RAW API PROPERTIES (what the API actually returned):")
-                $lines.Add("-" * 70)
-                foreach ($p in $D.PSObject.Properties) {
-                    $val = $p.Value
-                    # Flatten any nested objects one level deep for readability
-                    if ($null -ne $val -and $val -is [System.Management.Automation.PSCustomObject]) {
-                        $nested = ($val.PSObject.Properties | ForEach-Object { "$($_.Name)=$($_.Value)" }) -join '; '
-                        $val = "{ $nested }"
-                    } elseif ($null -ne $val -and $val -is [System.Object[]]) {
-                        $val = "[" + ($val -join ', ') + "]"
-                    }
-                    $lines.Add("  $($p.Name.PadRight(30)) = $val")
-                }
-                $lines.Add("")
-                $lines.Add("=" * 70)
-
-                [System.IO.File]::WriteAllLines($debugPath, $lines, [System.Text.Encoding]::UTF8)
-                Write-Log "Unexpected null fields detected -- debug report: $debugPath" "WARN"
-                Write-Log "  Null fields: $($nullFields -join ', ')" "WARN"
-            } catch {
-                Write-Log "Could not write null-field debug file: $_" "WARN"
-            }
-        }
-    }
-
-    return $flat
+function saveNote(id) {
+  id = String(id);
+  const ta = document.getElementById('noteTextarea');
+  if (!ta) return;
+  const text = ta.value.trim();
+  if (text) {
+    notes[id] = text;
+    // Also update the note on the reviewed entry if it exists
+    if (reviewed[id]) reviewed[id].note = text;
+  } else {
+    delete notes[id];
+    if (reviewed[id]) reviewed[id].note = '';
+  }
+  // Close the panel and refresh
+  const panel = document.getElementById('notePanel');
+  if (panel) panel.classList.remove('open');
+  updateStats();
+  renderSidebar();
+  renderDetail(currentIndex);
 }
 
-#endregion
-
-#region -- Output helpers --------------------------------------------------------
-
-function Get-SafeOutputPath {
-    param([string]$Dir, [string]$Base, [string]$Ext)
-    $candidate = Join-Path $Dir "$Base.$Ext"
-    $counter   = 1
-    while (Test-Path $candidate) { $candidate = Join-Path $Dir "${Base}_${counter}.$Ext"; $counter++ }
-    return $candidate
+function clearNote(id) {
+  id = String(id);
+  const ta = document.getElementById('noteTextarea');
+  if (ta) ta.value = '';
+  delete notes[id];
+  if (reviewed[id]) reviewed[id].note = '';
+  const panel = document.getElementById('notePanel');
+  if (panel) panel.classList.remove('open');
+  updateStats();
+  renderSidebar();
+  renderDetail(currentIndex);
 }
 
-function Save-RunLog {
-    param([string]$Dir, [string]$Base, [hashtable]$Meta)
-    try {
-        $path = Get-SafeOutputPath -Dir $Dir -Base "${Base}_runlog" -Ext "json"
-        @{ meta = $Meta; log = $script:RunLog } |
-            ConvertTo-Json -Depth 10 | ForEach-Object {
-                [System.IO.File]::WriteAllText($path, $_, [System.Text.Encoding]::UTF8)
-            }
-        Write-Log "Run log -> $path" "OK"
-    } catch {
-        Write-Log "WARNING: Could not save run log: $_" "WARN"
-    }
+function saveStateFile() {
+  const revCount = Object.keys(reviewed).length;
+  const hasAnything = revCount > 0 || flagged.size > 0 || Object.keys(notes).length > 0;
+  if (!hasAnything) {
+    alert('Nothing to save yet -- mark some exclusions as reviewed, flag them, or add notes first.');
+    return;
+  }
+
+  // Build a summary of who has reviewed what, for the audit header
+  const byReviewer = {};
+  Object.values(reviewed).forEach(e => {
+    const name = e.reviewerName || 'Unknown';
+    byReviewer[name] = (byReviewer[name] || 0) + 1;
+  });
+
+  // Sync any standalone notes into reviewed entries before saving
+  Object.entries(notes).forEach(([id, text]) => {
+    if (!reviewed[id]) return;  // note without review stays in notes only
+    reviewed[id].note = text;
+  });
+
+  const state = {
+    _info:          'ESET Inspect Exclusion Review State File -- save this back to the shared file share to keep everyone in sync',
+    _savedAt:       new Date().toISOString(),
+    _savedBy:       reviewerName || 'Unknown',
+    _totalReviewed: revCount,
+    _totalFlagged:  flagged.size,
+    _reviewerSummary: byReviewer,
+    _usage:         'Load this file alongside a new exclusion export to skip already-reviewed items. Multiple state files can be loaded one after another -- they are merged.',
+    reviewed,
+    notes,
+    flagged: Array.from(flagged),
+  };
+
+  const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
+  const a    = document.createElement('a');
+  a.href     = URL.createObjectURL(blob);
+  // Fixed filename so reviewers always overwrite the same file on the share
+  a.download = 'ESET_ExclusionReviewState.json';
+  a.click();
 }
 
-function Export-Detections {
-    param([System.Collections.Generic.List[object]]$Data, [string]$Base, [string]$Dir, [string]$Format, [string]$Label = "")
-    if ($Data.Count -eq 0) { return }
-    $tag = if ($Label) { " [$Label]" } else { "" }
-    if ($Format -in @("CSV","Both")) {
-        $path = Get-SafeOutputPath -Dir $Dir -Base $Base -Ext "csv"
-        $Data | Export-Csv -Path $path -NoTypeInformation -Encoding UTF8
-        Write-Log "CSV$tag -> $path" "OK"
-    }
-    if ($Format -in @("JSON","Both")) {
-        $path = Get-SafeOutputPath -Dir $Dir -Base $Base -Ext "json"
-        $json = $Data | ConvertTo-Json -Depth 10
-        [System.IO.File]::WriteAllText($path, $json, [System.Text.Encoding]::UTF8)
-        Write-Log "JSON$tag -> $path" "OK"
-    }
+// ============================================================
+// STATS
+// ============================================================
+function updateStats() {
+  const total    = allData.length;
+  const enabled  = allData.filter(d => !d.isDisabled).length;
+  const disabled = allData.filter(d =>  d.isDisabled).length;
+  const nRev     = Object.keys(reviewed).filter(id => allData.some(d => String(d.id) === id)).length;
+  const pending  = total - nRev;
+  const nFlagged = flagged.size;
+  document.getElementById('topbarStats').innerHTML = `
+    <span class="stat-chip total">Total: ${total}</span>
+    <span class="stat-chip enabled">Enabled: ${enabled}</span>
+    <span class="stat-chip disabled">Disabled: ${disabled}</span>
+    <span class="stat-chip reviewed">Reviewed: ${nRev}</span>
+    <span class="stat-chip flagged">Pending: ${pending} &nbsp;|&nbsp; Flagged: ${nFlagged}</span>`;
 }
 
-#endregion
-
-function Invoke-SaveConfig {
-    <#
-    Write the current effective settings back to the config file.
-    - Called automatically after a successful export when -SaveConfig is specified.
-    - Merges into any existing config rather than overwriting unrelated keys.
-    - Password is encrypted with DPAPI (Windows) so it is never stored in plaintext.
-    - DaysBack and Filter are intentionally NOT saved -- they are run-specific values
-      that you almost always want to choose fresh each time.
-    #>
-    param([string]$PlaintextPassword)
-
-    $path = Get-ConfigPath
-
-    # Load existing config as a hashtable so we can merge cleanly
-    $cfg = [ordered]@{}
-    if (Test-Path $path) {
-        try {
-            $existing = Get-Content $path -Raw | ConvertFrom-Json
-            foreach ($prop in $existing.PSObject.Properties) {
-                $cfg[$prop.Name] = $prop.Value
-            }
-        } catch {
-            Write-Log "Could not read existing config for merge (will overwrite): $_" "WARN"
-        }
-    }
-
-    # Stamp comment and version
-    $cfg['_comment']       = "ESET Inspect On-Prem Detection Exporter -- config file. All fields are optional; command-line arguments always override these values."
-    $cfg['_savedAt']       = (Get-Date).ToString('o')
-    $cfg['_scriptVersion'] = "3.0"
-
-    # Write every effective setting (skip DaysBack and Filter -- run-specific)
-    $cfg['Server']               = $script:cfg_Server
-    $cfg['Username']             = $script:cfg_Username
-    $cfg['Domain']               = $script:cfg_Domain
-    $cfg['OutputPath']           = $script:cfg_OutputPath
-    $cfg['ExportFormat']         = $script:cfg_ExportFormat
-    $cfg['PageSize']             = $script:cfg_PageSize
-    $cfg['FetchDetails']         = $script:cfg_FetchDetails
-    $cfg['FlattenComments']      = $script:cfg_FlattenComments
-    $cfg['DetailDelayMs']        = $script:cfg_DetailDelayMs
-    $cfg['MaxRetries']           = $script:cfg_MaxRetries
-    $cfg['SkipCertificateCheck'] = $script:cfg_SkipCertificateCheck
-
-    # Encrypt and save password if we have a plaintext copy (only available on this run)
-    if (-not [string]::IsNullOrWhiteSpace($PlaintextPassword)) {
-        if ($PSVersionTable.PSVersion.Major -ge 6 -and $PSVersionTable.Platform -ne "Win32NT") {
-            Write-Log "DPAPI not available on this OS -- password will not be saved to config." "WARN"
-        } else {
-            try {
-                Import-DpapiAssembly
-                $bytes     = [System.Text.Encoding]::UTF8.GetBytes($PlaintextPassword)
-                $encrypted = [System.Security.Cryptography.ProtectedData]::Protect(
-                    $bytes, $null,
-                    [System.Security.Cryptography.DataProtectionScope]::CurrentUser
-                )
-                $cfg['EncryptedPassword'] = [Convert]::ToBase64String($encrypted)
-                $cfg['_passwordComment']  = "Do not edit EncryptedPassword manually. Run with -SavePassword or -SaveConfig to update it."
-                Write-Log "Password encrypted (DPAPI) and saved to config." "OK"
-            } catch {
-                Write-Log "Could not encrypt password for config: $_" "WARN"
-            }
-        }
-    }
-
-    try {
-        $cfgJson = $cfg | ConvertTo-Json -Depth 5
-    [System.IO.File]::WriteAllText($path, $cfgJson, [System.Text.Encoding]::UTF8)
-        Write-Log "Settings saved to config: $path" "OK"
-        Write-Log "  Next run you can omit: -Server, -Username, -Password, -OutputPath, and all tuning flags." "OK"
-    } catch {
-        Write-Log "Failed to write config file '$path': $_" "WARN"
-    }
+// ============================================================
+// FLAG / EXPORT
+// ============================================================
+function toggleFlag(id) {
+  id = String(id);
+  if (flagged.has(id)) flagged.delete(id);
+  else flagged.add(id);
+  updateStats();
+  renderSidebar();
+  renderDetail(currentIndex);
 }
 
-function Get-DetectionComments {
-    <#
-    Fetches analyst comments for a detection from the undocumented /frontend/comments
-    endpoint used by the ESET Inspect React GUI.
+function openFlagModal() {
+  const flaggedItems = allData.filter(d => flagged.has(String(d.id)));
+  const sub = document.getElementById('flagModalSub');
+  const list = document.getElementById('flagList');
 
-    Returns two values via a small hashtable:
-      .text  -- all comments concatenated into a single string suitable for CSV
-               Format: "[2026-03-11 10:04 | eset_user] Test comment text | [...]"
-      .array -- the raw array of comment objects for JSON export
-    #>
-    param([string]$DetectionId, [hashtable]$Headers)
-
-    $result = @{ text = ""; array = @() }
-
-    try {
-        $body = @{ objectId = [int]$DetectionId; objectType = 1 }
-        $splat = New-ApiSplat -Uri "$("https://$($script:cfg_Server)")/frontend/comments" `
-                              -Method "POST" -Headers $Headers -Body $body
-        $resp = Invoke-RestMethod @splat
-
-        if ($null -eq $resp -or $resp.Count -eq 0) { return $result }
-
-        # Build a flat array of clean comment objects
-        $comments = @($resp | ForEach-Object {
-            $editedSuffix = if ($null -ne (Get-Prop $_ 'lastEditTime')) { " [edited]" } else { "" }
-            [PSCustomObject]@{
-                commentId    = Get-Prop $_ 'commentId'
-                authorName   = Get-Prop $_ 'authorName'
-                authorUuid   = Get-Prop $_ 'authorUuid'
-                creationTime = Get-Prop $_ 'creationTime'
-                lastEditTime = Get-Prop $_ 'lastEditTime'
-                comment      = (Get-Prop $_ 'commentValue' '')
-                edited       = ($null -ne (Get-Prop $_ 'lastEditTime'))
-            }
-        })
-
-        # CSV-friendly single string: "[date | author] text  |  [date | author] text"
-        $text = ($comments | ForEach-Object {
-            $ts = if ($_.creationTime) { ([datetime]$_.creationTime).ToString('yyyy-MM-dd HH:mm') } else { "?" }
-            "[$ts | $($_.authorName)] $($_.comment)"
-        }) -join "  |  "
-
-        $result.text  = $text
-        $result.array = $comments
-
-    } catch {
-        Write-Log "  Comments fetch failed for id=$DetectionId : $_" "WARN"
-    }
-
-    return $result
+  if (flaggedItems.length === 0) {
+    sub.textContent  = 'No exclusions have been flagged yet.';
+    list.innerHTML   = '';
+  } else {
+    sub.textContent = `${flaggedItems.length} exclusion(s) flagged for attention.`;
+    list.innerHTML  = flaggedItems.map(d => `
+      <li class="modal-item">
+        <div>${esc(d.name || '(unnamed)')}</div>
+        <div class="modal-item-id">ID: ${esc(String(d.id ?? ''))} &nbsp;|&nbsp; ${d.isDisabled ? 'DISABLED' : 'ENABLED'}</div>
+      </li>`).join('');
+  }
+  document.getElementById('flagModal').classList.add('open');
 }
 
-#region -- Entry point ------------------------------------------------------------
-
-# Handle utility modes before doing anything else
-if ($GenerateConfig) { Invoke-GenerateConfig }
-if ($SavePassword)   { Invoke-SavePassword   }
-
-# -- Load and merge config ----------------------------------------------------
-$fileCfg = Read-Config
-Merge-Config -Cfg $fileCfg
-
-# -- From here, use $script:cfg_* variables exclusively ----------------------
-
-$detailErrors  = 0
-$totalCount    = 0
-$pwdForSave    = ""          # plaintext password held briefly for -SaveConfig, zeroed after use
-$enriched      = [System.Collections.Generic.List[object]]::new()
-$allDetections = [System.Collections.Generic.List[object]]::new()
-$timestamp     = Get-Date -Format "yyyyMMdd_HHmmss"
-$baseName      = "ESET_Inspect_Detections_$timestamp"
-
-try {
-
-    # ===============================================================
-    # STEP 0 -- Banner
-    # ===============================================================
-    Write-Log "======================================================"
-    Write-Log " ESET Inspect On-Prem -- Detection Exporter v3.0"
-    Write-Log " Started : $($script:RunStart.ToString('yyyy-MM-dd HH:mm:ss'))"
-    Write-Log "======================================================"
-
-    # ===============================================================
-    # STEP 1 -- Validate resolved settings
-    # ===============================================================
-
-    if ([string]::IsNullOrWhiteSpace($script:cfg_Server)) {
-        throw ("Server is required. Supply it via -Server, or set it in the config file at: " +
-               (Get-ConfigPath))
-    }
-    if ([string]::IsNullOrWhiteSpace($script:cfg_Username)) {
-        throw ("Username is required. Supply it via -Username, or set it in the config file at: " +
-               (Get-ConfigPath))
-    }
-
-    if ($script:cfg_DaysBack -gt 0 -and $script:cfg_Filter -ne "") {
-        throw "-DaysBack and -Filter are mutually exclusive. Use one or the other, not both."
-    }
-    if ($script:cfg_DaysBack -gt 0) {
-        $since             = (Get-Date).ToUniversalTime().AddDays(-$script:cfg_DaysBack).ToString("yyyy-MM-ddTHH:mm:ssZ")
-        $script:cfg_Filter = "creationTime ge $since"
-        Write-Log "DaysBack=$($script:cfg_DaysBack) -> auto-filter: $($script:cfg_Filter)"
-    }
-
-    Write-Log "Config file   : $(Get-ConfigPath)"
-    Write-Log "Server        : $($script:cfg_Server)"
-    Write-Log "Username      : $($script:cfg_Username)"
-    Write-Log "Domain auth   : $($script:cfg_Domain)"
-    Write-Log "Filter        : $(if ($script:cfg_Filter) { $script:cfg_Filter } else { '(none -- all detections)' })"
-    Write-Log "FetchDetails  : $($script:cfg_FetchDetails)"
-    Write-Log "FlattenComments: $($script:cfg_FlattenComments)"
-    Write-Log "ExportFormat  : $($script:cfg_ExportFormat)"
-    Write-Log "OutputPath    : $($script:cfg_OutputPath)"
-    Write-Log "PageSize      : $($script:cfg_PageSize)  |  MaxRetries: $($script:cfg_MaxRetries)  |  DetailDelayMs: $($script:cfg_DetailDelayMs)"
-    Write-Log "------------------------------------------------------"
-
-    # ===============================================================
-    # STEP 2 -- TLS
-    # ===============================================================
-    if ($script:cfg_SkipCertificateCheck) {
-        Enable-TlsBypass
-        Write-Log "TLS certificate verification DISABLED (SkipCertificateCheck=true)." "WARN"
-    }
-
-    # ===============================================================
-    # STEP 3 -- Filter pre-validation
-    # ===============================================================
-    Test-FilterSyntax -F $script:cfg_Filter
-
-    # ===============================================================
-    # STEP 4 -- Output directory writability
-    # ===============================================================
-    Assert-OutputWritable -Dir $script:cfg_OutputPath
-
-    # ===============================================================
-    # STEP 5 -- Network pre-flight
-    # ===============================================================
-    if (-not (Test-ServerReachable -Hostname $script:cfg_Server)) {
-        throw ("Server '$($script:cfg_Server)' is not reachable on TCP 443. " +
-               "Verify hostname/IP, firewall rules, and that ESET Inspect is running.")
-    }
-
-    # ===============================================================
-    # STEP 6 -- Password (prompt if not in config or CLI)
-    # ===============================================================
-    if ([string]::IsNullOrEmpty($script:cfg_Password)) {
-        $secPwd              = Read-Host -Prompt "Password for '$($script:cfg_Username)'" -AsSecureString
-        $bstr                = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($secPwd)
-        $script:cfg_Password = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr)
-        [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
-    } else {
-        Write-Log "Password sourced from config file (encrypted)." "OK"
-    }
-    if ([string]::IsNullOrWhiteSpace($script:cfg_Password)) {
-        throw "Password cannot be empty."
-    }
-
-    # ===============================================================
-    # STEP 7 -- Authenticate
-    # ===============================================================
-    Write-Log "Authenticating as '$($script:cfg_Username)' on '$($script:cfg_Server)'..."
-    $token               = Invoke-Authenticate -Pwd $script:cfg_Password
-    # Capture plaintext for -SaveConfig BEFORE zeroing (needs to re-encrypt it)
-    $pwdForSave          = if ($SaveConfig) { $script:cfg_Password } else { "" }
-    $script:cfg_Password = "x" * $script:cfg_Password.Length
-    $script:cfg_Password = ""
-    $authHeaders         = @{ "Authorization" = "Bearer $token" }
-    $baseUrl             = "https://$($script:cfg_Server)"
-
-    # ===============================================================
-    # STEP 8 -- Total count
-    # ===============================================================
-    Write-Log "Querying total detection count..."
-    $countQuery = "`$count=1"
-    if ($script:cfg_Filter) { $countQuery += "&`$filter=$([Uri]::EscapeDataString($script:cfg_Filter))" }
-
-    $countResp = Invoke-ApiCall -Uri "$baseUrl/api/v1/detections?$countQuery" -Headers $authHeaders
-    if ($null -eq $countResp) { throw "Detection count API returned null." }
-    # PSObject.Properties is the StrictMode-safe way to check/read properties
-    $countProp = $countResp.PSObject.Properties['count']
-    if ($null -eq $countProp) {
-        throw "API response missing 'count' field. Raw: $($countResp | ConvertTo-Json -Compress -Depth 3)"
-    }
-    $totalCount = [int]$countProp.Value
-    Write-Log "Total detections matching filter: $totalCount" "OK"
-
-    if ($totalCount -eq 0) {
-        Write-Log "No detections match the filter. Nothing to export." "WARN"
-        exit 0
-    }
-
-    # ===============================================================
-    # STEP 9 -- Paginate
-    # ===============================================================
-    $pageCount = [Math]::Ceiling($totalCount / $script:cfg_PageSize)
-    Write-Log "Fetching $totalCount detection(s) across $pageCount page(s)..."
-
-    for ($page = 0; $page -lt $pageCount; $page++) {
-        Test-TokenAge
-        $skip  = $page * $script:cfg_PageSize
-        $query = "`$skip=$skip&`$top=$($script:cfg_PageSize)&`$orderBy=creationTime desc"
-        if ($script:cfg_Filter) { $query += "&`$filter=$([Uri]::EscapeDataString($script:cfg_Filter))" }
-
-        $pageResp  = Invoke-ApiCall -Uri "$baseUrl/api/v1/detections?$query" -Headers $authHeaders
-        $valueProp = if ($null -ne $pageResp) { $pageResp.PSObject.Properties['value'] } else { $null }
-        if ($null -eq $valueProp -or $null -eq $valueProp.Value) {
-            Write-Log "Page $($page+1) returned no data -- skipping." "WARN"
-            continue
-        }
-        $allDetections.AddRange([object[]]$valueProp.Value)
-
-        Write-Progress -Id 1 -Activity "Fetching detection list" `
-            -Status "$($page+1) of $pageCount pages  |  $($allDetections.Count) collected" `
-            -PercentComplete ([int](($page+1)/$pageCount*100))
-    }
-    Write-Progress -Id 1 -Activity "Fetching detection list" -Completed
-    Write-Log "List fetch complete: $($allDetections.Count) detection(s)." "OK"
-    # One-time diagnostic: dump all property names from the list endpoint object
-    # so we can identify the exact tag field name (only visible on list, not detail)
-    if ($allDetections.Count -gt 0) {
-        $listSample = $allDetections[0]
-        Write-Log "LIST RAW PROPS: $($listSample.PSObject.Properties.Name -join ', ')" "DEBUG"
-        $listSample.PSObject.Properties | Where-Object { $_.Name -match '(?i)tag|label|categor' } | ForEach-Object {
-            Write-Log "LIST TAG FIELD: [$($_.Name)] type=[$($_.Value.GetType().FullName)]  value=$($_.Value | ConvertTo-Json -Depth 3 -Compress)" "DEBUG"
-        }
-    }
-
-    if ($allDetections.Count -eq 0) { Write-Log "0 detections returned despite count=$totalCount." "WARN"; exit 0 }
-
-    # ===============================================================
-    # STEP 10 -- Detail fetch
-    # ===============================================================
-    if ($script:cfg_FetchDetails) {
-        Write-Log "Fetching per-detection detail for analyst notes and extra fields..."
-        $fetched = 0
-        foreach ($det in $allDetections) {
-            Test-TokenAge
-            $fetched++
-            # Get-Prop is StrictMode-safe -- won't throw if 'id' is absent
-            $detId = Get-Prop $det 'id' '(unknown)'
-            Write-Progress -Id 2 -Activity "Fetching detection details" `
-                -Status "$fetched / $($allDetections.Count)  |  id=$detId  |  errors=$detailErrors" `
-                -PercentComplete ([int]($fetched/$allDetections.Count*100))
-            try {
-                $detail   = Invoke-ApiCall -Uri "$baseUrl/api/v1/detections/$detId" -Headers $authHeaders
-                $comments = Get-DetectionComments -DetectionId $detId -Headers $authHeaders
-                $enriched.Add((ConvertTo-FlatDetection $detail $comments))
-            } catch {
-                $detailErrors++
-                Write-Log "  Detail fetch FAILED for id=$detId : $_ -- using list data." "WARN"
-                $comments = @{ text = ""; array = @() }
-                $enriched.Add((ConvertTo-FlatDetection $det $comments))
-            }
-            if ($script:cfg_DetailDelayMs -gt 0) { Start-Sleep -Milliseconds $script:cfg_DetailDelayMs }
-        }
-        Write-Progress -Id 2 -Activity "Fetching detection details" -Completed
-        if ($detailErrors -gt 0) {
-            Write-Log "$detailErrors detail fetch(es) failed and fell back to list data." "WARN"
-        } else {
-            Write-Log "All detail fetches completed successfully." "OK"
-        }
-    } else {
-        Write-Log "FetchDetails=false -- detail-only fields and comments will be empty." "WARN"
-        foreach ($det in $allDetections) {
-            $enriched.Add((ConvertTo-FlatDetection $det @{ text = ""; array = @() }))
-        }
-    }
-
-    Write-Log "$($enriched.Count) detection(s) ready for export." "OK"
-
-    # ===============================================================
-    # STEP 10b -- Flatten comments (if requested)
-    # ===============================================================
-    if ($script:cfg_FlattenComments) {
-        Write-Log "Flattening comments into numbered columns for Excel compatibility..."
-
-        # First pass -- find the maximum number of comments across all detections
-        $maxComments = 0
-        foreach ($det in $enriched) {
-            $arr = $det.PSObject.Properties['commentsArray']
-            if ($null -ne $arr -and $null -ne $arr.Value) {
-                $count = @($arr.Value).Count
-                if ($count -gt $maxComments) { $maxComments = $count }
-            }
-        }
-        Write-Log "  Max comments on a single detection: $maxComments"
-
-        if ($maxComments -gt 0) {
-            # Second pass -- rebuild each detection object with flat comment columns
-            $flatEnriched = [System.Collections.Generic.List[object]]::new($enriched.Count)
-            foreach ($det in $enriched) {
-                # Copy all existing properties except commentsArray
-                $props = [ordered]@{}
-                foreach ($p in $det.PSObject.Properties) {
-                    if ($p.Name -ne 'commentsArray') {
-                        $props[$p.Name] = $p.Value
-                    }
-                }
-
-                # Add one set of columns per possible comment slot
-                $arr = $det.PSObject.Properties['commentsArray']
-                $comments = if ($null -ne $arr -and $null -ne $arr.Value) { @($arr.Value) } else { @() }
-
-                for ($i = 1; $i -le $maxComments; $i++) {
-                    $c = if ($i -le $comments.Count) { $comments[$i - 1] } else { $null }
-                    $props["comment${i}_author"] = if ($null -ne $c) { $c.authorName   } else { "" }
-                    $props["comment${i}_time"]   = if ($null -ne $c) { $c.creationTime } else { "" }
-                    $props["comment${i}_text"]   = if ($null -ne $c) { $c.comment      } else { "" }
-                }
-
-                $flatEnriched.Add([PSCustomObject]$props)
-            }
-            $enriched = $flatEnriched
-            Write-Log "Comments flattened into $maxComments column group(s) (comment1_author/time/text, comment2_..., etc.)." "OK"
-        } else {
-            Write-Log "No comments found -- skipping flatten, commentsArray will be empty." "WARN"
-        }
-    }
-
-    # ===============================================================
-    # STEP 11 -- Export
-    # ===============================================================
-    Export-Detections -Data $enriched -Base $baseName -Dir $script:cfg_OutputPath -Format $script:cfg_ExportFormat
-
-    # ===============================================================
-    # STEP 11b -- Save config (if requested)
-    # ===============================================================
-    if ($SaveConfig) {
-        Write-Log "Saving current settings to config file (-SaveConfig)..."
-        Invoke-SaveConfig -PlaintextPassword $pwdForSave
-        # Zero the saved copy now we are done with it
-        $pwdForSave = "x" * $pwdForSave.Length; $pwdForSave = ""
-    }
-
-    # ===============================================================
-    # STEP 12 -- Run log
-    # ===============================================================
-    Save-RunLog -Dir $script:cfg_OutputPath -Base $baseName -Meta @{
-        scriptVersion     = "3.0"
-        configFile        = (Get-ConfigPath)
-        runStart          = $script:RunStart.ToString("o")
-        runEnd            = (Get-Date).ToString("o")
-        durationSeconds   = [int]((Get-Date) - $script:RunStart).TotalSeconds
-        server            = $script:cfg_Server
-        username          = $script:cfg_Username
-        domain            = $script:cfg_Domain
-        filter            = $script:cfg_Filter
-        pageSize          = $script:cfg_PageSize
-        fetchDetails      = $script:cfg_FetchDetails
-        detailDelayMs     = $script:cfg_DetailDelayMs
-        maxRetries        = $script:cfg_MaxRetries
-        exportFormat      = $script:cfg_ExportFormat
-        outputPath        = $script:cfg_OutputPath
-        totalMatched      = $totalCount
-        totalFetched      = $allDetections.Count
-        totalExported     = $enriched.Count
-        detailFetchErrors = $detailErrors
-        exitCode          = $script:ExitCode
-    }
-
-    # ===============================================================
-    # STEP 13 -- Summary
-    # ===============================================================
-    $duration = [int]((Get-Date) - $script:RunStart).TotalSeconds
-    Write-Log "======================================================"
-    Write-Log " Export complete in ${duration} second(s)"
-    Write-Log " Matched by filter   : $totalCount"
-    Write-Log " Detections exported : $($enriched.Count)"
-    if ($script:cfg_FetchDetails) { Write-Log " Detail fetch errors : $detailErrors" }
-    Write-Log "======================================================"
-
-} catch {
-    $script:ExitCode = 1
-    Write-Log "FATAL ERROR: $_" "ERROR"
-    Write-Log "Stack trace:`n$($_.ScriptStackTrace)" "DEBUG"
-
-    $emergBase = "ESET_Inspect_Detections_FAILED_$(Get-Date -Format 'yyyyMMdd_HHmmss')"
-    $emergDir  = if ($script:cfg_OutputPath -and (Test-Path $script:cfg_OutputPath -IsValid)) {
-                     $script:cfg_OutputPath
-                 } else { (Get-Location).Path }
-
-    Save-RunLog -Dir $emergDir -Base $emergBase -Meta @{
-        runStart   = $script:RunStart.ToString("o")
-        fatalError = $_.ToString()
-        stackTrace = $_.ScriptStackTrace
-        partialDetectionsCollected = $enriched.Count
-    }
-
-    if ($enriched.Count -gt 0) {
-        Write-Log "Saving $($enriched.Count) partially-collected detection(s)..." "WARN"
-        Export-Detections -Data $enriched -Base "${emergBase}_partial" `
-                          -Dir $emergDir -Format $script:cfg_ExportFormat -Label "PARTIAL"
-    }
-
-} finally {
-    Write-Progress -Id 1 -Activity "Fetching detection list"    -Completed -ErrorAction SilentlyContinue
-    Write-Progress -Id 2 -Activity "Fetching detection details" -Completed -ErrorAction SilentlyContinue
+function closeFlagModal() {
+  document.getElementById('flagModal').classList.remove('open');
 }
 
-exit $script:ExitCode
+function downloadFlagged() {
+  const flaggedItems = allData.filter(d => flagged.has(String(d.id)));
+  if (flaggedItems.length === 0) { alert('No flagged exclusions to export.'); return; }
+  const blob = new Blob([JSON.stringify(flaggedItems, null, 2)], { type: 'application/json' });
+  const a    = document.createElement('a');
+  a.href     = URL.createObjectURL(blob);
+  a.download = `ESET_Flagged_Exclusions_${new Date().toISOString().slice(0,10)}.json`;
+  a.click();
+  closeFlagModal();
+}
 
-#endregion
+// ============================================================
+// XML / UTILS
+// ============================================================
+function copyXml() {
+  const d = filteredData[currentIndex];
+  if (!d || !d.xmlBody) return;
+  navigator.clipboard.writeText(d.xmlBody).then(() => {
+    const btn = document.getElementById('copyBtn');
+    if (btn) { btn.textContent = 'Copied!'; btn.classList.add('copied'); setTimeout(() => { btn.textContent = 'Copy XML'; btn.classList.remove('copied'); }, 2000); }
+  });
+}
+
+function highlightXml(xml) {
+  if (!xml) return '';
+  let s = xml.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  s = s.replace(/(&lt;!--[\s\S]*?--&gt;)/g, '<span class="xml-comment">$1</span>');
+  s = s.replace(/(&lt;\/?)([\w:\-\.]+)((?:\s+[\w:\-\.]+\s*=\s*&quot;[^&]*&quot;)*)\s*(\/?&gt;)/g,
+    (_, open, tag, attrs, close) => {
+      const attrsHtml = attrs.replace(/([\w:\-\.]+)\s*=\s*(&quot;[^&]*&quot;)/g,
+        '<span class="xml-attr">$1</span>=<span class="xml-val">$2</span>');
+      return `${open}<span class="xml-tag">${tag}</span>${attrsHtml}${close}`;
+    });
+  s = s.replace(/(&lt;\/?)([\w:\-\.]+)(\s*\/?&gt;)/g,
+    (m, open, tag, close) => `${open}<span class="xml-tag">${tag}</span>${close}`);
+  return s;
+}
+
+function esc(s) {
+  return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function navigate(dir) {
+  const next = currentIndex + dir;
+  if (next >= 0 && next < filteredData.length) selectItem(next);
+}
+
+document.addEventListener('keydown', e => {
+  if (app.style.display === 'none') return;
+  if (document.getElementById('flagModal').classList.contains('open')) return;
+  if (e.target.tagName === 'INPUT') return;
+  if (e.key === 'ArrowRight' || e.key === 'ArrowDown') { e.preventDefault(); navigate(1); }
+  if (e.key === 'ArrowLeft'  || e.key === 'ArrowUp')   { e.preventDefault(); navigate(-1); }
+  if (e.key === 'f' || e.key === 'F') { const d = filteredData[currentIndex]; if (d) toggleFlag(String(d.id)); }
+  if (e.key === 'r' || e.key === 'R') { const d = filteredData[currentIndex]; if (d) markReviewed(String(d.id)); }
+});
+</script>
+</body>
+</html>
