@@ -205,8 +205,28 @@
   .filter-btn.active         { background: var(--accent); border-color: var(--accent); color: #fff; }
   .filter-btn.active-red     { background: var(--red);    border-color: var(--red);    color: #fff; }
   .filter-btn.active-yellow  { background: var(--flag);   border-color: var(--flag);   color: #000; }
+  .filter-btn.active-green   { background: var(--green);  border-color: var(--green);  color: #000; }
+  .filter-btn.active-purple  { background: var(--accent2);border-color: var(--accent2);color: #fff; }
 
   .filter-label { font-size: 12px; color: var(--muted); font-weight: 600; letter-spacing: 0.05em; }
+
+  /* ---- STATS PANEL ---- */
+  .stats-panel { background: var(--surface); border-bottom: 1px solid var(--border); padding: 14px 24px; display: none; }
+  .stats-panel.open { display: block; }
+  .stats-header { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
+  .stats-title { font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.1em; flex: 1; }
+  .stats-toggle { padding: 3px 10px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface2); color: var(--muted); font-family: 'Syne', sans-serif; font-size: 11px; font-weight: 600; cursor: pointer; transition: all 0.15s; }
+  .stats-toggle:hover { border-color: var(--accent); color: var(--text); }
+  .stats-toggle.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .stats-grid { display: flex; flex-wrap: wrap; gap: 8px; }
+  .stats-row { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 8px 14px; display: flex; align-items: center; gap: 10px; cursor: pointer; transition: all 0.15s; user-select: none; min-width: 200px; }
+  .stats-row:hover { border-color: var(--accent); }
+  .stats-row.excluded { opacity: 0.35; }
+  .stats-row.excluded .stats-name { text-decoration: line-through; }
+  .stats-name  { font-size: 13px; font-weight: 600; color: var(--text); flex: 1; }
+  .stats-count { font-size: 12px; font-family: 'JetBrains Mono', monospace; color: var(--accent); white-space: nowrap; }
+  .stats-bar-wrap { flex: 1; min-width: 60px; height: 5px; background: var(--border); border-radius: 3px; overflow: hidden; }
+  .stats-bar { height: 100%; background: var(--accent); border-radius: 3px; transition: width 0.3s; }
 
   /* ---- MAIN LAYOUT ---- */
   .main {
@@ -828,6 +848,7 @@
     <div class="topbar-stats" id="topbarStats"></div>
     <div class="topbar-spacer"></div>
     <div class="topbar-actions">
+      <button class="btn" onclick="toggleStatsPanel()">&#128202; Stats</button>
       <button class="btn" onclick="openFlagModal()" id="exportFlagBtn">&#9873; Export Flagged</button>
       <button class="btn btn-accent" onclick="saveStateFile()">&#128190; Save Review State</button>
       <button class="btn" onclick="resetApp()">&#8617; Load New File</button>
@@ -840,14 +861,25 @@
       <span class="search-icon">&#128269;</span>
       <input class="search-input" type="text" id="searchInput" placeholder="Search by name, note, rule ID..." oninput="applyFilters()">
     </div>
-    <span class="filter-label">Show:</span>
-    <button class="filter-btn active" id="filterAll"        onclick="setFilter('all')">All</button>
-    <button class="filter-btn"        id="filterPending"    onclick="setFilter('pending')">Pending</button>
-    <button class="filter-btn"        id="filterReviewed"   onclick="setFilter('reviewed')">Reviewed</button>
-    <button class="filter-btn"        id="filterEnabled"    onclick="setFilter('enabled')">Enabled</button>
-    <button class="filter-btn"        id="filterDisabled"   onclick="setFilter('disabled')">Disabled</button>
-    <button class="filter-btn"        id="filterFlagged"    onclick="setFilter('flagged')">Flagged</button>
-    <button class="filter-btn"        id="filterNoRules"    onclick="setFilter('norules')">No Rules</button>
+    <span class="filter-label">Filter:</span>
+    <button class="filter-btn active" id="filterAll"        onclick="setFilter('all')" title="Clear all filters">All</button>
+    <button class="filter-btn"        id="filterPending"    onclick="toggleFilter('pending')" title="Not yet reviewed">Pending</button>
+    <button class="filter-btn"        id="filterReviewed"   onclick="toggleFilter('reviewed')" title="Marked as reviewed">Reviewed</button>
+    <button class="filter-btn"        id="filterEnabled"    onclick="toggleFilter('enabled')" title="Enabled exclusions">Enabled</button>
+    <button class="filter-btn"        id="filterDisabled"   onclick="toggleFilter('disabled')" title="Disabled exclusions">Disabled</button>
+    <button class="filter-btn"        id="filterFlagged"    onclick="toggleFilter('flagged')" title="Flagged for attention">Flagged</button>
+    <button class="filter-btn"        id="filterHasNote"    onclick="toggleFilter('hasnote')" title="Has a note">Has Note</button>
+    <button class="filter-btn"        id="filterNoRules"    onclick="toggleFilter('norules')" title="Not linked to any rule">No Rules</button>
+  </div>
+
+  <!-- Stats panel -->
+  <div class="stats-panel" id="statsPanel">
+    <div class="stats-header">
+      <span class="stats-title">&#128202; Reviewer Statistics</span>
+      <button class="stats-toggle" id="statsToggleMode" onclick="toggleStatsMode()" title="Switch between count and percent">Show %</button>
+      <span style="font-size:11px;color:var(--muted)">Click a reviewer to exclude from stats</span>
+    </div>
+    <div class="stats-grid" id="statsGrid"></div>
   </div>
 
   <!-- Main -->
@@ -886,7 +918,9 @@ let filteredData  = [];
 let flagged       = new Set();
 let reviewed      = {};   // { id: { reviewerName, timestamp, note } }
 let notes         = {};   // { id: noteText } -- decoupled from reviewed so anyone can add notes
-let currentFilter = 'all';
+let activeFilters      = new Set();
+let statsShowPct       = false;
+let excludedReviewers  = new Set();
 let currentIndex  = 0;
 let reviewerName  = '';
 let stateLoaded   = false;
@@ -1018,7 +1052,7 @@ function loadStateFile(file) {
 function initApp() {
   // Do NOT clear flagged/reviewed/notes here -- state file may have been
   // loaded before the export, and initApp must not wipe it.
-  currentFilter = 'all';
+  activeFilters.clear();
   currentIndex  = 0;
   document.getElementById('searchInput').value = '';
   setFilter('all');
@@ -1040,35 +1074,62 @@ function resetApp() {
 // FILTERING
 // ============================================================
 function setFilter(f) {
-  currentFilter = f;
-  ['all','pending','reviewed','enabled','disabled','flagged','norules'].forEach(k => {
+  // 'all' clears all active filters
+  activeFilters.clear();
+  document.getElementById('filterAll').classList.add('active');
+  ['pending','reviewed','enabled','disabled','flagged','hasnote','norules'].forEach(k => {
+    const id  = 'filter' + k.charAt(0).toUpperCase() + k.slice(1);
+    const btn = document.getElementById(id);
+    if (btn) btn.classList.remove('active','active-red','active-yellow','active-green','active-purple');
+  });
+  applyFilters();
+}
+
+function toggleFilter(f) {
+  // Toggle this filter on/off; multiple can be active simultaneously
+  if (activeFilters.has(f)) activeFilters.delete(f);
+  else activeFilters.add(f);
+
+  // Update All button -- active only when nothing else is active
+  const allBtn = document.getElementById('filterAll');
+  if (allBtn) {
+    if (activeFilters.size === 0) allBtn.classList.add('active');
+    else allBtn.classList.remove('active');
+  }
+
+  // Update each filter button
+  const colorMap = { disabled: 'active-red', flagged: 'active-yellow', reviewed: 'active-green', hasnote: 'active-purple' };
+  ['pending','reviewed','enabled','disabled','flagged','hasnote','norules'].forEach(k => {
     const id  = 'filter' + k.charAt(0).toUpperCase() + k.slice(1);
     const btn = document.getElementById(id);
     if (!btn) return;
-    btn.classList.remove('active','active-red','active-yellow','active-green');
-    if (k === f) {
-      if (k === 'disabled')  btn.classList.add('active-red');
-      else if (k === 'flagged') btn.classList.add('active-yellow');
-      else if (k === 'reviewed') btn.classList.add('active-green');
-      else btn.classList.add('active');
-    }
+    btn.classList.remove('active','active-red','active-yellow','active-green','active-purple');
+    if (activeFilters.has(k)) btn.classList.add(colorMap[k] || 'active');
   });
+
   applyFilters();
 }
 
 function applyFilters() {
   const q = document.getElementById('searchInput').value.toLowerCase().trim();
   filteredData = allData.filter(d => {
-    const isRev = !!reviewed[String(d.id)];
-    if (currentFilter === 'pending'   && isRev)                           return false;
-    if (currentFilter === 'reviewed'  && !isRev)                          return false;
-    if (currentFilter === 'enabled'   && d.isDisabled)                    return false;
-    if (currentFilter === 'disabled'  && !d.isDisabled)                   return false;
-    if (currentFilter === 'flagged'   && !flagged.has(String(d.id)))      return false;
-    if (currentFilter === 'norules'   && d.linkedRules)                   return false;
+    const isRev     = !!reviewed[String(d.id)];
+    const isFlagged = flagged.has(String(d.id));
+    const hasNote   = !!(notes[String(d.id)] && notes[String(d.id)].trim());
+
+    // Multi-filter: ALL active filters must match (AND logic)
+    if (activeFilters.has('pending')   && isRev)             return false;
+    if (activeFilters.has('reviewed')  && !isRev)            return false;
+    if (activeFilters.has('enabled')   && d.isDisabled)      return false;
+    if (activeFilters.has('disabled')  && !d.isDisabled)     return false;
+    if (activeFilters.has('flagged')   && !isFlagged)        return false;
+    if (activeFilters.has('hasnote')   && !hasNote)          return false;
+    if (activeFilters.has('norules')   && d.linkedRules)     return false;
+
     if (q) {
       const haystack = [d.name, d.note, d.ruleIds, d.ruleUuids, d.uuid,
-                        d.xmlBody, d.author, d.targets, d.ruleName]
+                        d.xmlBody, d.author, d.targets, d.ruleName,
+                        notes[String(d.id)]]
         .filter(Boolean).join(' ').toLowerCase();
       if (!haystack.includes(q)) return false;
     }
@@ -1078,11 +1139,7 @@ function applyFilters() {
   currentIndex = 0;
   renderSidebar();
   if (filteredData.length > 0) renderDetail(0);
-  else document.getElementById('detailPanel').innerHTML = `
-    <div class="detail-empty">
-      <div class="detail-empty-icon">&#128269;</div>
-      <div class="detail-empty-text">No exclusions match the current filter</div>
-    </div>`;
+  else document.getElementById('detailPanel').innerHTML = '<div class="detail-empty"><div class="detail-empty-icon">&#128269;</div><div class="detail-empty-text">No exclusions match the current filter</div></div>';
 }
 
 // ============================================================
@@ -1174,7 +1231,7 @@ function renderDetail(i) {
           <span class="xml-toolbar-label">XML Criteria Body</span>
           <button class="copy-btn" id="copyBtn" onclick="copyXml()">Copy XML</button>
         </div>
-        <div class="xml-code" id="xmlCode">${highlightXml(d.xmlBody)}</div>
+        <div class="xml-code" id="xmlCode">${highlightXml(prettyXml(d.xmlBody))}</div>
        </div>`
     : `<div class="xml-wrap">
         <div class="xml-toolbar"><span class="xml-toolbar-label">XML Criteria Body</span></div>
@@ -1426,12 +1483,14 @@ function updateStats() {
   const nRev     = Object.keys(reviewed).filter(id => allData.some(d => String(d.id) === id)).length;
   const pending  = total - nRev;
   const nFlagged = flagged.size;
-  document.getElementById('topbarStats').innerHTML = `
-    <span class="stat-chip total">Total: ${total}</span>
-    <span class="stat-chip enabled">Enabled: ${enabled}</span>
-    <span class="stat-chip disabled">Disabled: ${disabled}</span>
-    <span class="stat-chip reviewed">Reviewed: ${nRev}</span>
-    <span class="stat-chip flagged">Pending: ${pending} &nbsp;|&nbsp; Flagged: ${nFlagged}</span>`;
+  document.getElementById('topbarStats').innerHTML = '<span class="stat-chip total">Total: ' + total + '</span>'
+    + '<span class="stat-chip enabled">Enabled: ' + enabled + '</span>'
+    + '<span class="stat-chip disabled">Disabled: ' + disabled + '</span>'
+    + '<span class="stat-chip reviewed">Reviewed: ' + nRev + '</span>'
+    + '<span class="stat-chip flagged">Pending: ' + pending + ' &nbsp;|&nbsp; Flagged: ' + nFlagged + '</span>';
+  // Refresh stats panel if open
+  const sp = document.getElementById('statsPanel');
+  if (sp && sp.classList.contains('open')) renderStats();
 }
 
 // ============================================================
@@ -1514,6 +1573,102 @@ function esc(s) {
 function navigate(dir) {
   const next = currentIndex + dir;
   if (next >= 0 && next < filteredData.length) selectItem(next);
+}
+
+// ============================================================
+// STATS PANEL
+// ============================================================
+function toggleStatsPanel() {
+  const panel = document.getElementById('statsPanel');
+  if (!panel) return;
+  panel.classList.toggle('open');
+  if (panel.classList.contains('open')) renderStats();
+}
+
+function toggleStatsMode() {
+  statsShowPct = !statsShowPct;
+  const btn = document.getElementById('statsToggleMode');
+  if (btn) { btn.textContent = statsShowPct ? 'Show #' : 'Show %'; btn.classList.toggle('on', statsShowPct); }
+  renderStats();
+}
+
+function renderStats() {
+  const grid = document.getElementById('statsGrid');
+  if (!grid) return;
+
+  // Count reviewed per reviewer (excluding excluded reviewers)
+  const counts = {};
+  let total = 0;
+  Object.values(reviewed).forEach(e => {
+    const name = e.reviewerName || 'Unknown';
+    counts[name] = (counts[name] || 0) + 1;
+    total++;
+  });
+
+  if (total === 0) {
+    grid.innerHTML = '<span style="color:var(--muted);font-size:13px;font-style:italic">No reviewed exclusions yet.</span>';
+    return;
+  }
+
+  const maxCount = Math.max(...Object.values(counts));
+
+  grid.innerHTML = Object.entries(counts)
+    .sort((a, b) => b[1] - a[1])
+    .map(([name, count]) => {
+      const isExcluded = excludedReviewers.has(name);
+      const pct        = total > 0 ? ((count / total) * 100).toFixed(1) : 0;
+      const barWidth   = maxCount > 0 ? Math.round((count / maxCount) * 100) : 0;
+      const label      = statsShowPct ? pct + '%' : count + ' / ' + total;
+      return '<div class="stats-row' + (isExcluded ? ' excluded' : '') + '" onclick="toggleExcludeReviewer(\'' + esc(name) + '\')" title="Click to exclude from stats">'
+        + '<span class="stats-name">' + esc(name) + '</span>'
+        + '<div class="stats-bar-wrap"><div class="stats-bar" style="width:' + (isExcluded ? 0 : barWidth) + '%"></div></div>'
+        + '<span class="stats-count">' + label + '</span>'
+        + '</div>';
+    }).join('');
+}
+
+function toggleExcludeReviewer(name) {
+  if (excludedReviewers.has(name)) excludedReviewers.delete(name);
+  else excludedReviewers.add(name);
+  renderStats();
+}
+
+// ============================================================
+// XML PRETTY PRINT
+// ============================================================
+function prettyXml(xml) {
+  if (!xml || !xml.trim()) return xml;
+  try {
+    // Use DOMParser to parse and re-serialise with indentation
+    const parser = new DOMParser();
+    const doc    = parser.parseFromString(xml.trim(), 'application/xml');
+    const err    = doc.querySelector('parsererror');
+    if (err) return xml; // not valid XML -- return as-is
+    return serializeXml(doc.documentElement, 0);
+  } catch(e) { return xml; }
+}
+
+function serializeXml(node, depth) {
+  const indent = '  '.repeat(depth);
+  if (node.nodeType === 3) { // text node
+    const text = node.textContent.trim();
+    return text ? indent + text : '';
+  }
+  if (node.nodeType !== 1) return ''; // not element
+
+  const tag   = node.tagName;
+  const attrs = Array.from(node.attributes)
+    .map(a => ' ' + a.name + '="' + a.value + '"').join('');
+
+  const children = Array.from(node.childNodes)
+    .map(c => serializeXml(c, depth + 1))
+    .filter(s => s.trim() !== '');
+
+  if (children.length === 0) return indent + '<' + tag + attrs + '/>';
+  if (children.length === 1 && !children[0].includes('\n')) {
+    return indent + '<' + tag + attrs + '>' + children[0].trim() + '</' + tag + '>';
+  }
+  return indent + '<' + tag + attrs + '>\n' + children.join('\n') + '\n' + indent + '</' + tag + '>';
 }
 
 document.addEventListener('keydown', e => {
