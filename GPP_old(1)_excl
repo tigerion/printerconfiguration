@@ -205,8 +205,28 @@
   .filter-btn.active         { background: var(--accent); border-color: var(--accent); color: #fff; }
   .filter-btn.active-red     { background: var(--red);    border-color: var(--red);    color: #fff; }
   .filter-btn.active-yellow  { background: var(--flag);   border-color: var(--flag);   color: #000; }
+  .filter-btn.active-green   { background: var(--green);  border-color: var(--green);  color: #000; }
+  .filter-btn.active-purple  { background: var(--accent2);border-color: var(--accent2);color: #fff; }
 
   .filter-label { font-size: 12px; color: var(--muted); font-weight: 600; letter-spacing: 0.05em; }
+
+  /* ---- STATS PANEL ---- */
+  .stats-panel { background: var(--surface); border-bottom: 1px solid var(--border); padding: 14px 24px; display: none; }
+  .stats-panel.open { display: block; }
+  .stats-header { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
+  .stats-title { font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.1em; flex: 1; }
+  .stats-toggle { padding: 3px 10px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface2); color: var(--muted); font-family: 'Syne', sans-serif; font-size: 11px; font-weight: 600; cursor: pointer; transition: all 0.15s; }
+  .stats-toggle:hover { border-color: var(--accent); color: var(--text); }
+  .stats-toggle.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .stats-grid { display: flex; flex-wrap: wrap; gap: 8px; }
+  .stats-row { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 8px 14px; display: flex; align-items: center; gap: 10px; cursor: pointer; transition: all 0.15s; user-select: none; min-width: 200px; }
+  .stats-row:hover { border-color: var(--accent); }
+  .stats-row.excluded { opacity: 0.35; }
+  .stats-row.excluded .stats-name { text-decoration: line-through; }
+  .stats-name  { font-size: 13px; font-weight: 600; color: var(--text); flex: 1; }
+  .stats-count { font-size: 12px; font-family: 'JetBrains Mono', monospace; color: var(--accent); white-space: nowrap; }
+  .stats-bar-wrap { flex: 1; min-width: 60px; height: 5px; background: var(--border); border-radius: 3px; overflow: hidden; }
+  .stats-bar { height: 100%; background: var(--accent); border-radius: 3px; transition: width 0.3s; }
 
   /* ---- MAIN LAYOUT ---- */
   .main {
@@ -619,19 +639,20 @@
   .review-card .review-note { margin-top: 6px; color: var(--text); white-space: pre-wrap; }
 
   .mark-reviewed-btn {
-    padding: 9px 18px;
+    padding: 6px 12px;
     border-radius: 8px;
     border: 1px solid var(--green);
     background: rgba(34,197,94,0.1);
     color: var(--green);
     font-family: 'Syne', sans-serif;
-    font-size: 13px;
+    font-size: 12px;
     font-weight: 600;
     cursor: pointer;
     transition: all 0.15s;
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 5px;
+    white-space: nowrap;
   }
   .mark-reviewed-btn:hover     { background: var(--green); color: #000; }
   .mark-reviewed-btn.done      { background: var(--green); color: #000; border-color: var(--green); }
@@ -693,6 +714,95 @@
   .name-input:focus { border-color: var(--accent); }
 
   .stat-chip.reviewed { background: rgba(34,197,94,0.12); border-color: rgba(34,197,94,0.3); color: var(--green); }
+
+  /* ---- NOTE PANEL ---- */
+  .note-panel {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent2);
+    border-radius: 0 10px 10px 0;
+    padding: 14px 16px;
+    margin-bottom: 24px;
+    display: none;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .note-panel.open { display: flex; }
+
+  .note-panel-label {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+  }
+
+  .note-textarea {
+    width: 100%;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    color: var(--text);
+    font-family: 'Syne', sans-serif;
+    font-size: 13px;
+    line-height: 1.6;
+    resize: vertical;
+    min-height: 80px;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+  .note-textarea:focus { border-color: var(--accent2); }
+  .note-textarea::placeholder { color: var(--muted); font-style: italic; }
+
+  .note-panel-actions { display: flex; gap: 8px; }
+
+  .note-save-btn {
+    padding: 6px 14px;
+    border-radius: 7px;
+    border: 1px solid var(--accent2);
+    background: rgba(124,58,237,0.15);
+    color: var(--accent2);
+    font-family: 'Syne', sans-serif;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .note-save-btn:hover { background: var(--accent2); color: #fff; }
+
+  .note-clear-btn {
+    padding: 6px 14px;
+    border-radius: 7px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--muted);
+    font-family: 'Syne', sans-serif;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .note-clear-btn:hover { border-color: var(--red); color: var(--red); }
+
+  .note-btn {
+    padding: 6px 12px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--muted);
+    font-family: 'Syne', sans-serif;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    white-space: nowrap;
+  }
+  .note-btn:hover        { border-color: var(--accent2); color: var(--accent2); }
+  .note-btn.has-note     { border-color: var(--accent2); color: var(--accent2); background: rgba(124,58,237,0.1); }
 </style>
 </head>
 <body>
@@ -704,6 +814,9 @@
     <p>Your name will be recorded with each exclusion you mark as reviewed, and saved in the review state file.</p>
     <input class="name-input" id="reviewerNameInput" type="text" placeholder="Your name..." maxlength="80"
            onkeydown="if(event.key==='Enter') confirmReviewerName()">
+    <input class="name-input" id="baseUrlInput" type="text" placeholder="Server URL (optional) e.g. https://esethost.local" maxlength="200"
+           onkeydown="if(event.key==='Enter') confirmReviewerName()"
+           style="margin-top:0;font-size:13px;font-weight:400">
     <button class="btn btn-accent" onclick="confirmReviewerName()">Start Review &rarr;</button>
   </div>
 </div>
@@ -740,6 +853,8 @@
     <div class="topbar-stats" id="topbarStats"></div>
     <div class="topbar-spacer"></div>
     <div class="topbar-actions">
+      <button class="btn" onclick="toggleStatsPanel()">&#128202; Stats</button>
+      <button class="btn" onclick="exportFiltered()">&#8681; Export View</button>
       <button class="btn" onclick="openFlagModal()" id="exportFlagBtn">&#9873; Export Flagged</button>
       <button class="btn btn-accent" onclick="saveStateFile()">&#128190; Save Review State</button>
       <button class="btn" onclick="resetApp()">&#8617; Load New File</button>
@@ -752,14 +867,31 @@
       <span class="search-icon">&#128269;</span>
       <input class="search-input" type="text" id="searchInput" placeholder="Search by name, note, rule ID..." oninput="applyFilters()">
     </div>
-    <span class="filter-label">Show:</span>
-    <button class="filter-btn active" id="filterAll"        onclick="setFilter('all')">All</button>
-    <button class="filter-btn"        id="filterPending"    onclick="setFilter('pending')">Pending</button>
-    <button class="filter-btn"        id="filterReviewed"   onclick="setFilter('reviewed')">Reviewed</button>
-    <button class="filter-btn"        id="filterEnabled"    onclick="setFilter('enabled')">Enabled</button>
-    <button class="filter-btn"        id="filterDisabled"   onclick="setFilter('disabled')">Disabled</button>
-    <button class="filter-btn"        id="filterFlagged"    onclick="setFilter('flagged')">Flagged</button>
-    <button class="filter-btn"        id="filterNoRules"    onclick="setFilter('norules')">No Rules</button>
+    <span class="filter-label">Filter:</span>
+    <button class="filter-btn active" id="filterAll"        onclick="setFilter('all')" title="Clear all filters">All</button>
+    <button class="filter-btn"        id="filterPending"    onclick="toggleFilter('pending')" title="Not yet reviewed">Pending</button>
+    <button class="filter-btn"        id="filterReviewed"   onclick="toggleFilter('reviewed')" title="Marked as reviewed">Reviewed</button>
+    <button class="filter-btn"        id="filterEnabled"    onclick="toggleFilter('enabled')" title="Enabled exclusions">Enabled</button>
+    <button class="filter-btn"        id="filterDisabled"   onclick="toggleFilter('disabled')" title="Disabled exclusions">Disabled</button>
+    <button class="filter-btn"        id="filterFlagged"    onclick="toggleFilter('flagged')" title="Flagged for attention">Flagged</button>
+    <button class="filter-btn"        id="filterHasNote"    onclick="toggleFilter('hasnote')" title="Has a note">Has Note</button>
+    <button class="filter-btn"        id="filterNoRules"    onclick="toggleFilter('norules')" title="Not linked to any rule">No Rules</button>
+    <div style="flex:1"></div>
+    <div style="display:flex;gap:6px;align-items:center;border-left:1px solid var(--border);padding-left:12px">
+      <button class="mark-reviewed-btn" id="quickReviewBtn" onclick="quickAction('review')" title="Mark current as reviewed (R)">&#10003; Review</button>
+      <button class="note-btn"          id="quickNoteBtn"   onclick="quickAction('note')"   title="Add note to current (N)">&#128221; Note</button>
+      <button class="flag-btn"          id="quickFlagBtn"   onclick="quickAction('flag')"   title="Flag current (F)">&#9873; Flag</button>
+    </div>
+  </div>
+
+  <!-- Stats panel -->
+  <div class="stats-panel" id="statsPanel">
+    <div class="stats-header">
+      <span class="stats-title">&#128202; Exclusion Author Statistics</span>
+      <button class="stats-toggle" id="statsToggleMode" onclick="toggleStatsMode()" title="Switch between count and percent">Show %</button>
+      <span style="font-size:11px;color:var(--muted)">Click an author to exclude from stats</span>
+    </div>
+    <div class="stats-grid" id="statsGrid"></div>
   </div>
 
   <!-- Main -->
@@ -797,9 +929,13 @@ let allData       = [];
 let filteredData  = [];
 let flagged       = new Set();
 let reviewed      = {};   // { id: { reviewerName, timestamp, note } }
-let currentFilter = 'all';
+let notes         = {};   // { id: noteText } -- decoupled from reviewed so anyone can add notes
+let activeFilters      = new Set();
+let statsShowPct       = false;
+let excludedReviewers  = new Set();
 let currentIndex  = 0;
 let reviewerName  = '';
+let baseUrl       = '';   // e.g. https://esethost.local
 let stateLoaded   = false;
 
 // ============================================================
@@ -812,6 +948,8 @@ function confirmReviewerName() {
     return;
   }
   reviewerName = val;
+  const urlVal = document.getElementById('baseUrlInput').value.trim().replace(/\/$/, '');
+  baseUrl      = urlVal;
   document.getElementById('nameOverlay').classList.remove('open');
 }
 
@@ -841,7 +979,9 @@ function loadFile(file) {
   const reader = new FileReader();
   reader.onload = e => {
     try {
-      let parsed = JSON.parse(e.target.result);
+      // Strip UTF-8 BOM if present (PS 5.1 Out-File adds it)
+      let raw = e.target.result.replace(/^﻿/, '');
+      let parsed = JSON.parse(raw);
       if (Array.isArray(parsed)) {
         allData = parsed;
       } else if (parsed.value && Array.isArray(parsed.value)) {
@@ -863,58 +1003,85 @@ function loadFile(file) {
       alert('Failed to parse JSON file: ' + err.message);
     }
   };
-  reader.readAsText(file);
+  reader.readAsText(file, 'UTF-8');
 }
 
 function loadStateFile(file) {
   const reader = new FileReader();
   reader.onload = e => {
     try {
-      const parsed = JSON.parse(e.target.result);
-      // State file format: { reviewed: { "id": { reviewerName, timestamp, note } } }
+      const raw    = e.target.result.replace(/^﻿/, '');
+      const parsed = JSON.parse(raw);
+      // Validate it's a state file -- must have at least one of these keys
+      const isValidState = parsed.reviewed || parsed.flagged || parsed.notes;
+      if (!isValidState) {
+        alert('Not a valid review state file.\n\nTop-level keys found: ' + Object.keys(parsed).join(', '));
+        return;
+      }
+
+
+
+      let added = 0, skipped = 0;
+
+      // Merge reviewed entries
       if (parsed.reviewed && typeof parsed.reviewed === 'object') {
-        // MERGE into current reviewed state -- never replace.
-        // This means multiple state files from different reviewers can be
-        // loaded one after another and all entries are preserved.
-        // If the same exclusion was reviewed by two people, the EARLIER
-        // review is kept (first reviewer wins).
-        let added = 0, skipped = 0;
         Object.entries(parsed.reviewed).forEach(([id, entry]) => {
           if (!reviewed[id]) { reviewed[id] = entry; added++; }
           else skipped++;
         });
-        stateLoaded = true;
-        const total = Object.keys(reviewed).length;
-        document.getElementById('stateFileHint').textContent =
-          `State merged: ${total} reviewed total (${added} added, ${skipped} already known)`;
-        document.getElementById('stateDropBox').style.borderColor = 'var(--green)';
-        document.getElementById('stateDropBox').style.borderStyle = 'solid';
-        // If app already open, refresh
-        if (app.style.display !== 'none') { updateStats(); applyFilters(); }
-      } else {
-        alert('Not a valid review state file. Expected { "reviewed": { ... } }');
+        // Extract inline notes from reviewed entries
+        Object.entries(parsed.reviewed).forEach(([id, entry]) => {
+          if (entry.note && !notes[id]) notes[id] = entry.note;
+        });
       }
+
+      // Merge standalone notes
+      if (parsed.notes && typeof parsed.notes === 'object') {
+        Object.entries(parsed.notes).forEach(([id, text]) => {
+          if (!notes[id]) notes[id] = text;
+        });
+      }
+
+      // Merge flagged items -- always processed regardless of reviewed state
+      if (Array.isArray(parsed.flagged)) {
+        parsed.flagged.forEach(id => flagged.add(String(id)));
+      }
+
+      stateLoaded = true;
+      const total      = Object.keys(reviewed).length;
+      const totalFlags = flagged.size;
+      const totalNotes = Object.keys(notes).length;
+      document.getElementById('stateFileHint').textContent =
+        `State merged: ${total} reviewed, ${totalFlags} flagged, ${totalNotes} notes (${added} new reviews added)`;
+      document.getElementById('stateDropBox').style.borderColor = 'var(--green)';
+      document.getElementById('stateDropBox').style.borderStyle = 'solid';
+      // If app already open, refresh
+      if (app.style.display !== 'none') { updateStats(); applyFilters(); }
     } catch(err) {
       alert('Failed to parse state file: ' + err.message);
     }
   };
-  reader.readAsText(file);
+  reader.readAsText(file, 'UTF-8');
 }
 
 function initApp() {
-  flagged.clear();
-  currentFilter = 'all';
+  // Do NOT clear flagged/reviewed/notes here -- state file may have been
+  // loaded before the export, and initApp must not wipe it.
+  activeFilters.clear();
   currentIndex  = 0;
   document.getElementById('searchInput').value = '';
   setFilter('all');
   dropzone.style.display = 'none';
   app.style.display = 'flex';
   updateStats();
+  // Refresh stats panel if already open
+  const sp = document.getElementById('statsPanel');
+  if (sp && sp.classList.contains('open')) renderStats();
 }
 
 function resetApp() {
-  allData = []; filteredData = []; flagged.clear();
-  // Keep reviewed state and reviewer name across sessions
+  allData = []; filteredData = []; flagged.clear(); reviewed = {}; notes = {};
+  // Reviewer name is kept across sessions
   app.style.display = 'none';
   dropzone.style.display = 'flex';
   fileInput.value = '';
@@ -925,35 +1092,62 @@ function resetApp() {
 // FILTERING
 // ============================================================
 function setFilter(f) {
-  currentFilter = f;
-  ['all','pending','reviewed','enabled','disabled','flagged','norules'].forEach(k => {
+  // 'all' clears all active filters
+  activeFilters.clear();
+  document.getElementById('filterAll').classList.add('active');
+  ['pending','reviewed','enabled','disabled','flagged','hasnote','norules'].forEach(k => {
+    const id  = 'filter' + k.charAt(0).toUpperCase() + k.slice(1);
+    const btn = document.getElementById(id);
+    if (btn) btn.classList.remove('active','active-red','active-yellow','active-green','active-purple');
+  });
+  applyFilters();
+}
+
+function toggleFilter(f) {
+  // Toggle this filter on/off; multiple can be active simultaneously
+  if (activeFilters.has(f)) activeFilters.delete(f);
+  else activeFilters.add(f);
+
+  // Update All button -- active only when nothing else is active
+  const allBtn = document.getElementById('filterAll');
+  if (allBtn) {
+    if (activeFilters.size === 0) allBtn.classList.add('active');
+    else allBtn.classList.remove('active');
+  }
+
+  // Update each filter button
+  const colorMap = { disabled: 'active-red', flagged: 'active-yellow', reviewed: 'active-green', hasnote: 'active-purple' };
+  ['pending','reviewed','enabled','disabled','flagged','hasnote','norules'].forEach(k => {
     const id  = 'filter' + k.charAt(0).toUpperCase() + k.slice(1);
     const btn = document.getElementById(id);
     if (!btn) return;
-    btn.classList.remove('active','active-red','active-yellow','active-green');
-    if (k === f) {
-      if (k === 'disabled')  btn.classList.add('active-red');
-      else if (k === 'flagged') btn.classList.add('active-yellow');
-      else if (k === 'reviewed') btn.classList.add('active-green');
-      else btn.classList.add('active');
-    }
+    btn.classList.remove('active','active-red','active-yellow','active-green','active-purple');
+    if (activeFilters.has(k)) btn.classList.add(colorMap[k] || 'active');
   });
+
   applyFilters();
 }
 
 function applyFilters() {
   const q = document.getElementById('searchInput').value.toLowerCase().trim();
   filteredData = allData.filter(d => {
-    const isRev = !!reviewed[String(d.id)];
-    if (currentFilter === 'pending'   && isRev)                           return false;
-    if (currentFilter === 'reviewed'  && !isRev)                          return false;
-    if (currentFilter === 'enabled'   && d.isDisabled)                    return false;
-    if (currentFilter === 'disabled'  && !d.isDisabled)                   return false;
-    if (currentFilter === 'flagged'   && !flagged.has(String(d.id)))      return false;
-    if (currentFilter === 'norules'   && d.linkedRules)                   return false;
+    const isRev     = !!reviewed[String(d.id)];
+    const isFlagged = flagged.has(String(d.id));
+    const hasNote   = !!(notes[String(d.id)] && notes[String(d.id)].trim());
+
+    // Multi-filter: ALL active filters must match (AND logic)
+    if (activeFilters.has('pending')   && isRev)             return false;
+    if (activeFilters.has('reviewed')  && !isRev)            return false;
+    if (activeFilters.has('enabled')   && d.isDisabled)      return false;
+    if (activeFilters.has('disabled')  && !d.isDisabled)     return false;
+    if (activeFilters.has('flagged')   && !isFlagged)        return false;
+    if (activeFilters.has('hasnote')   && !hasNote)          return false;
+    if (activeFilters.has('norules')   && d.linkedRules)     return false;
+
     if (q) {
       const haystack = [d.name, d.note, d.ruleIds, d.ruleUuids, d.uuid,
-                        d.xmlBody, d.author, d.targets, d.ruleName]
+                        d.xmlBody, d.author, d.targets, d.ruleName,
+                        notes[String(d.id)]]
         .filter(Boolean).join(' ').toLowerCase();
       if (!haystack.includes(q)) return false;
     }
@@ -963,11 +1157,7 @@ function applyFilters() {
   currentIndex = 0;
   renderSidebar();
   if (filteredData.length > 0) renderDetail(0);
-  else document.getElementById('detailPanel').innerHTML = `
-    <div class="detail-empty">
-      <div class="detail-empty-icon">&#128269;</div>
-      <div class="detail-empty-text">No exclusions match the current filter</div>
-    </div>`;
+  else document.getElementById('detailPanel').innerHTML = '<div class="detail-empty"><div class="detail-empty-icon">&#128269;</div><div class="detail-empty-text">No exclusions match the current filter</div></div>';
 }
 
 // ============================================================
@@ -990,11 +1180,12 @@ function renderSidebar() {
       : '';
     const flagBadge  = isFlagged ? '<span class="badge badge-flag">&#9873;</span>' : '';
     const revBadge   = isRev ? '<span class="badge badge-reviewed">&#10003;</span>' : '';
+    const noteBadge  = notes[String(d.id)] ? '<span class="badge" style="background:rgba(124,58,237,0.15);color:var(--accent2)">&#128221;</span>' : '';
     const xmlBadge   = !d.hasXml ? '<span class="badge badge-noxml">no XML</span>' : '';
     return `<li class="sidebar-item${i === currentIndex ? ' active' : ''}${isFlagged ? ' flagged-item' : ''}${isRev ? ' reviewed-item' : ''}"
                onclick="selectItem(${i})">
       <div class="item-name" title="${esc(d.name || '(unnamed)')}">${esc(d.name || '(unnamed)')}</div>
-      <div class="item-meta">${statusBadge}${ruleBadge}${revBadge}${flagBadge}${xmlBadge}</div>
+      <div class="item-meta">${statusBadge}${ruleBadge}${revBadge}${noteBadge}${flagBadge}${xmlBadge}</div>
     </li>`;
   }).join('');
 }
@@ -1003,6 +1194,7 @@ function selectItem(i) {
   currentIndex = i;
   renderSidebar();
   renderDetail(i);
+  updateQuickBar();
   const items = document.querySelectorAll('.sidebar-item');
   if (items[i]) items[i].scrollIntoView({ block: 'nearest' });
 }
@@ -1017,6 +1209,7 @@ function renderDetail(i) {
   const isFlagged = flagged.has(String(d.id));
   const revEntry  = reviewed[String(d.id)];
   const isRev     = !!revEntry;
+  const hasNote   = !!(notes[String(d.id)] && notes[String(d.id)].trim());
 
   const statusBadge = d.isDisabled
     ? '<span class="badge badge-disabled" style="font-size:13px;padding:4px 10px">DISABLED</span>'
@@ -1033,7 +1226,7 @@ function renderDetail(i) {
           </div>
           <button class="unmark-btn" onclick="unmarkReviewed('${d.id}')">&#8617; Mark as Pending</button>
         </div>
-        ${revEntry.note ? `<div class="review-note">${esc(revEntry.note)}</div>` : ''}
+
       </div>`
     : '';
 
@@ -1057,12 +1250,17 @@ function renderDetail(i) {
           <span class="xml-toolbar-label">XML Criteria Body</span>
           <button class="copy-btn" id="copyBtn" onclick="copyXml()">Copy XML</button>
         </div>
-        <div class="xml-code" id="xmlCode">${highlightXml(d.xmlBody)}</div>
+        <div class="xml-code" id="xmlCode">${highlightXml(prettyXml(d.xmlBody))}</div>
        </div>`
     : `<div class="xml-wrap">
         <div class="xml-toolbar"><span class="xml-toolbar-label">XML Criteria Body</span></div>
         <div class="xml-empty">No XML body &mdash; this is a standard criteria exclusion or was exported without -FetchDetails</div>
        </div>`;
+
+  const noteDisplayHtml = hasNote
+    ? '<div class="section-label">&#128221; Note</div>' +
+      '<div class="note-block" style="border-left-color:var(--accent2);margin-bottom:20px">' + esc(notes[String(d.id)]) + '</div>'
+    : '';
 
   document.getElementById('detailPanel').innerHTML = `
     <div class="detail-nav">
@@ -1073,12 +1271,27 @@ function renderDetail(i) {
       <button class="mark-reviewed-btn${isRev ? ' done' : ''}" onclick="markReviewed('${d.id}')">
         ${isRev ? '&#10003; Reviewed' : '&#10003; Mark as Reviewed'}
       </button>
+      <button class="note-btn${hasNote ? ' has-note' : ''}" onclick="toggleNotePanel('${d.id}')" title="Add or edit a note">
+        &#128221; ${hasNote ? 'Edit Note' : 'Add Note'}
+      </button>
       <button class="flag-btn${isFlagged ? ' flagged' : ''}" onclick="toggleFlag('${d.id}')">
         &#9873; ${isFlagged ? 'Unflag' : 'Flag'}
       </button>
     </div>
 
     ${reviewedHtml}
+
+    <div class="note-panel" id="notePanel">
+      <div class="note-panel-label">&#128221; Note</div>
+      <textarea class="note-textarea" id="noteTextarea" placeholder="Add a note about this exclusion..." rows="4">${hasNote ? esc(getNoteForId('${d.id}')) : ''}</textarea>
+      <div class="note-panel-actions">
+        <button class="note-save-btn" onclick="saveNote('${d.id}')">Save Note</button>
+        <button class="note-clear-btn" onclick="clearNote('${d.id}')">Clear</button>
+        <button class="note-clear-btn" onclick="toggleNotePanel('${d.id}')">Cancel</button>
+      </div>
+    </div>
+
+    ${noteDisplayHtml}
 
     <div class="detail-header">
       <div class="detail-title">${esc(d.name || '(unnamed)')}</div>
@@ -1087,8 +1300,12 @@ function renderDetail(i) {
 
     <div class="fields-grid">
       <div class="field-card">
-        <div class="field-label">ID</div>
-        <div class="field-value">${esc(String(d.id ?? ''))}</div>
+        <div class="field-label">Exclusion URL</div>
+        <div class="field-value" style="word-break:break-all">
+          ${baseUrl
+            ? '<a href="' + baseUrl + '/console/exclusion/' + esc(String(d.id ?? '')) + '" target="_blank" rel="noopener" style="color:var(--accent);text-decoration:none;font-size:12px">' + baseUrl + '/console/exclusion/' + esc(String(d.id ?? '')) + '</a>'
+            : esc(String(d.id ?? ''))}
+        </div>
       </div>
       <div class="field-card">
         <div class="field-label">Author</div>
@@ -1162,20 +1379,17 @@ function markReviewed(id) {
   id = String(id);
   if (reviewed[id]) { unmarkReviewed(id); return; }
 
-  // Optionally prompt for a review note
-  const note = prompt('Optional: add a review note (press Cancel or leave blank to skip)', '') ;
-  // null = cancelled prompt = still mark as reviewed, just no note
-
   reviewed[id] = {
     reviewerName: reviewerName || 'Unknown',
     timestamp:    new Date().toISOString(),
-    note:         (note || '').trim(),
+    note:         (notes[id] || '').trim(),  // use note if already written
     exclusionId:  id,
   };
   updateStats();
   renderSidebar();
   renderDetail(currentIndex);
-  // Auto-advance to next unreviewed item if there is one
+  updateQuickBar();
+  // Auto-advance to next unreviewed item
   const next = filteredData.slice(currentIndex + 1).findIndex(x => !reviewed[String(x.id)]);
   if (next !== -1) selectItem(currentIndex + 1 + next);
 }
@@ -1186,12 +1400,69 @@ function unmarkReviewed(id) {
   updateStats();
   renderSidebar();
   renderDetail(currentIndex);
+  updateQuickBar();
+}
+
+function getNoteForId(id) {
+  return notes[String(id)] || '';
+}
+
+function toggleNotePanel(id) {
+  const panel = document.getElementById('notePanel');
+  if (!panel) return;
+  const isOpen = panel.classList.contains('open');
+  if (isOpen) {
+    panel.classList.remove('open');
+  } else {
+    // Pre-fill textarea with existing note
+    const ta = document.getElementById('noteTextarea');
+    if (ta) ta.value = notes[String(id)] || '';
+    panel.classList.add('open');
+    if (ta) ta.focus();
+  }
+}
+
+function saveNote(id) {
+  id = String(id);
+  const ta = document.getElementById('noteTextarea');
+  if (!ta) return;
+  const text = ta.value.trim();
+  if (text) {
+    notes[id] = text;
+    // Also update the note on the reviewed entry if it exists
+    if (reviewed[id]) reviewed[id].note = text;
+  } else {
+    delete notes[id];
+    if (reviewed[id]) reviewed[id].note = '';
+  }
+  // Close the panel and refresh
+  const panel = document.getElementById('notePanel');
+  if (panel) panel.classList.remove('open');
+  updateStats();
+  renderSidebar();
+  renderDetail(currentIndex);
+  updateQuickBar();
+}
+
+function clearNote(id) {
+  id = String(id);
+  const ta = document.getElementById('noteTextarea');
+  if (ta) ta.value = '';
+  delete notes[id];
+  if (reviewed[id]) reviewed[id].note = '';
+  const panel = document.getElementById('notePanel');
+  if (panel) panel.classList.remove('open');
+  updateStats();
+  renderSidebar();
+  renderDetail(currentIndex);
+  updateQuickBar();
 }
 
 function saveStateFile() {
   const revCount = Object.keys(reviewed).length;
-  if (revCount === 0) {
-    alert('No exclusions have been marked as reviewed yet.');
+  const hasAnything = revCount > 0 || flagged.size > 0 || Object.keys(notes).length > 0;
+  if (!hasAnything) {
+    alert('Nothing to save yet -- mark some exclusions as reviewed, flag them, or add notes first.');
     return;
   }
 
@@ -1202,14 +1473,23 @@ function saveStateFile() {
     byReviewer[name] = (byReviewer[name] || 0) + 1;
   });
 
+  // Sync any standalone notes into reviewed entries before saving
+  Object.entries(notes).forEach(([id, text]) => {
+    if (!reviewed[id]) return;  // note without review stays in notes only
+    reviewed[id].note = text;
+  });
+
   const state = {
     _info:          'ESET Inspect Exclusion Review State File -- save this back to the shared file share to keep everyone in sync',
     _savedAt:       new Date().toISOString(),
     _savedBy:       reviewerName || 'Unknown',
     _totalReviewed: revCount,
+    _totalFlagged:  flagged.size,
     _reviewerSummary: byReviewer,
     _usage:         'Load this file alongside a new exclusion export to skip already-reviewed items. Multiple state files can be loaded one after another -- they are merged.',
     reviewed,
+    notes,
+    flagged: Array.from(flagged),
   };
 
   const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
@@ -1230,12 +1510,14 @@ function updateStats() {
   const nRev     = Object.keys(reviewed).filter(id => allData.some(d => String(d.id) === id)).length;
   const pending  = total - nRev;
   const nFlagged = flagged.size;
-  document.getElementById('topbarStats').innerHTML = `
-    <span class="stat-chip total">Total: ${total}</span>
-    <span class="stat-chip enabled">Enabled: ${enabled}</span>
-    <span class="stat-chip disabled">Disabled: ${disabled}</span>
-    <span class="stat-chip reviewed">Reviewed: ${nRev}</span>
-    <span class="stat-chip flagged">Pending: ${pending} &nbsp;|&nbsp; Flagged: ${nFlagged}</span>`;
+  document.getElementById('topbarStats').innerHTML = '<span class="stat-chip total">Total: ' + total + '</span>'
+    + '<span class="stat-chip enabled">Enabled: ' + enabled + '</span>'
+    + '<span class="stat-chip disabled">Disabled: ' + disabled + '</span>'
+    + '<span class="stat-chip reviewed">Reviewed: ' + nRev + '</span>'
+    + '<span class="stat-chip flagged">Pending: ' + pending + ' &nbsp;|&nbsp; Flagged: ' + nFlagged + '</span>';
+  // Refresh stats panel if open
+  const sp = document.getElementById('statsPanel');
+  if (sp && sp.classList.contains('open')) renderStats();
 }
 
 // ============================================================
@@ -1248,6 +1530,7 @@ function toggleFlag(id) {
   updateStats();
   renderSidebar();
   renderDetail(currentIndex);
+  updateQuickBar();
 }
 
 function openFlagModal() {
@@ -1320,10 +1603,188 @@ function navigate(dir) {
   if (next >= 0 && next < filteredData.length) selectItem(next);
 }
 
+// ============================================================
+// STATS PANEL
+// ============================================================
+function toggleStatsPanel() {
+  const panel = document.getElementById('statsPanel');
+  if (!panel) return;
+  panel.classList.toggle('open');
+  if (panel.classList.contains('open')) renderStats();
+}
+
+function toggleStatsMode() {
+  statsShowPct = !statsShowPct;
+  const btn = document.getElementById('statsToggleMode');
+  if (btn) { btn.textContent = statsShowPct ? 'Show #' : 'Show %'; btn.classList.toggle('on', statsShowPct); }
+  renderStats();
+}
+
+function renderStats() {
+  const grid = document.getElementById('statsGrid');
+  if (!grid) return;
+
+  // Count exclusions per author from the loaded export data
+  // excludedReviewers Set is reused here as "excludedAuthors" for filtering
+  const counts = {};
+  allData.forEach(d => {
+    const name = (d.author && d.author.trim()) ? d.author.trim() : '(unknown)';
+    counts[name] = (counts[name] || 0) + 1;
+  });
+
+  if (Object.keys(counts).length === 0) {
+    grid.innerHTML = '<span style="color:var(--muted);font-size:13px;font-style:italic">No exclusion data loaded yet.</span>';
+    return;
+  }
+
+  // Total excluding any excluded authors (for percentage calculation)
+  const includedTotal = Object.entries(counts)
+    .filter(([name]) => !excludedReviewers.has(name))
+    .reduce((sum, [, n]) => sum + n, 0);
+  const grandTotal = Object.values(counts).reduce((s, n) => s + n, 0);
+
+  const maxCount = Math.max(...Object.values(counts));
+
+  grid.innerHTML = Object.entries(counts)
+    .sort((a, b) => b[1] - a[1])
+    .map(([name, count]) => {
+      const isExcluded = excludedReviewers.has(name);
+      const base       = statsShowPct ? (isExcluded ? grandTotal : includedTotal) : grandTotal;
+      const pct        = base > 0 ? ((count / base) * 100).toFixed(1) : '0.0';
+      const barWidth   = maxCount > 0 ? Math.round((count / maxCount) * 100) : 0;
+      const label      = statsShowPct ? pct + '%' : count + ' / ' + grandTotal;
+      return '<div class="stats-row' + (isExcluded ? ' excluded' : '') + '" onclick="toggleExcludeAuthor(this.dataset.name)" data-name="' + esc(name) + '" title="Click to exclude this author from stats">'
+        + '<span class="stats-name">' + esc(name) + '</span>'
+        + '<div class="stats-bar-wrap"><div class="stats-bar" style="width:' + (isExcluded ? 0 : barWidth) + '%"></div></div>'
+        + '<span class="stats-count">' + label + '</span>'
+        + '</div>';
+    }).join('');
+}
+
+function toggleExcludeAuthor(name) {
+  if (excludedReviewers.has(name)) excludedReviewers.delete(name);
+  else excludedReviewers.add(name);
+  renderStats();
+}
+
+// ============================================================
+// XML PRETTY PRINT
+// ============================================================
+function prettyXml(xml) {
+  if (!xml || !xml.trim()) return xml;
+  try {
+    // Use DOMParser to parse and re-serialise with indentation
+    const parser = new DOMParser();
+    const doc    = parser.parseFromString(xml.trim(), 'application/xml');
+    const err    = doc.querySelector('parsererror');
+    if (err) return xml; // not valid XML -- return as-is
+    return serializeXml(doc.documentElement, 0);
+  } catch(e) { return xml; }
+}
+
+function serializeXml(node, depth) {
+  const indent = '  '.repeat(depth);
+  if (node.nodeType === 3) { // text node
+    const text = node.textContent.trim();
+    return text ? indent + text : '';
+  }
+  if (node.nodeType !== 1) return ''; // not element
+
+  const tag   = node.tagName;
+  const attrs = Array.from(node.attributes)
+    .map(a => ' ' + a.name + '="' + a.value + '"').join('');
+
+  const children = Array.from(node.childNodes)
+    .map(c => serializeXml(c, depth + 1))
+    .filter(s => s.trim() !== '');
+
+  if (children.length === 0) return indent + '<' + tag + attrs + '/>';
+  if (children.length === 1 && !children[0].includes('\n')) {
+    return indent + '<' + tag + attrs + '>' + children[0].trim() + '</' + tag + '>';
+  }
+  return indent + '<' + tag + attrs + '>\n' + children.join('\n') + '\n' + indent + '</' + tag + '>';
+}
+
+// ============================================================
+// QUICK ACTION BAR (fixed in filterbar, always visible)
+// ============================================================
+function updateQuickBar() {
+  // Update the three quick action buttons in the filterbar
+  // to reflect the current item's state
+  const d         = filteredData[currentIndex];
+  const revBtn    = document.getElementById('quickReviewBtn');
+  const noteBtn   = document.getElementById('quickNoteBtn');
+  const flagBtn   = document.getElementById('quickFlagBtn');
+  if (!revBtn || !noteBtn || !flagBtn) return;
+
+  if (!d) {
+    revBtn.disabled = noteBtn.disabled = flagBtn.disabled = true;
+    return;
+  }
+  revBtn.disabled = noteBtn.disabled = flagBtn.disabled = false;
+
+  const isRev     = !!reviewed[String(d.id)];
+  const hasNote   = !!(notes[String(d.id)] && notes[String(d.id)].trim());
+  const isFlagged = flagged.has(String(d.id));
+
+  revBtn.textContent  = isRev     ? '✓ Reviewed'  : '✓ Review';
+  revBtn.className    = 'mark-reviewed-btn' + (isRev ? ' done' : '');
+
+  noteBtn.textContent = hasNote   ? '📝 Edit Note' : '📝 Note';
+  noteBtn.className   = 'note-btn' + (hasNote ? ' has-note' : '');
+
+  flagBtn.textContent = isFlagged ? '⚑ Unflag'    : '⚑ Flag';
+  flagBtn.className   = 'flag-btn' + (isFlagged ? ' flagged' : '');
+}
+
+function quickAction(action) {
+  const d = filteredData[currentIndex];
+  if (!d) return;
+  if (action === 'review') markReviewed(String(d.id));
+  if (action === 'flag')   toggleFlag(String(d.id));
+  if (action === 'note')   toggleNotePanel(String(d.id));
+}
+
+// ============================================================
+// EXPORT FILTERED VIEW
+// ============================================================
+function exportFiltered() {
+  if (filteredData.length === 0) {
+    alert('No exclusions in the current view to export.');
+    return;
+  }
+
+  // Build export: each exclusion with its review state, notes and flag merged in
+  const exportData = filteredData.map(d => {
+    const id      = String(d.id);
+    const revEntry = reviewed[id] || null;
+    return Object.assign({}, d, {
+      _reviewState: {
+        isReviewed:   !!revEntry,
+        reviewedBy:   revEntry ? revEntry.reviewerName : null,
+        reviewedAt:   revEntry ? revEntry.timestamp    : null,
+        isFlagged:    flagged.has(id),
+        note:         notes[id] || (revEntry ? revEntry.note : null) || null,
+      }
+    });
+  });
+
+  // Describe active filters for filename
+  const filterDesc = activeFilters.size > 0
+    ? Array.from(activeFilters).join('_')
+    : 'all';
+
+  const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+  const a    = document.createElement('a');
+  a.href     = URL.createObjectURL(blob);
+  a.download = 'ESET_Exclusions_' + filterDesc + '_' + new Date().toISOString().slice(0,10) + '.json';
+  a.click();
+}
+
 document.addEventListener('keydown', e => {
   if (app.style.display === 'none') return;
   if (document.getElementById('flagModal').classList.contains('open')) return;
-  if (e.target.tagName === 'INPUT') return;
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
   if (e.key === 'ArrowRight' || e.key === 'ArrowDown') { e.preventDefault(); navigate(1); }
   if (e.key === 'ArrowLeft'  || e.key === 'ArrowUp')   { e.preventDefault(); navigate(-1); }
   if (e.key === 'f' || e.key === 'F') { const d = filteredData[currentIndex]; if (d) toggleFlag(String(d.id)); }
