@@ -1217,17 +1217,10 @@ function renderDetail(i) {
 
   // Reviewed status block
   const reviewedHtml = isRev
-    ? `<div class="review-card">
-        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
-          <div>
-            <span class="review-by">&#10003; Reviewed by ${esc(revEntry.reviewerName)}</span>
-            &nbsp;&nbsp;
-            <span class="review-time">${esc(new Date(revEntry.timestamp).toLocaleString())}</span>
-          </div>
-          <button class="unmark-btn" onclick="unmarkReviewed('${d.id}')">&#8617; Mark as Pending</button>
-        </div>
-
-      </div>`
+    ? '<div class="review-card">'
+      + '<span class="review-by">&#10003; Reviewed by ' + esc(revEntry.reviewerName) + '</span>'
+      + '&nbsp;&nbsp;<span class="review-time">' + esc(new Date(revEntry.timestamp).toLocaleString()) + '</span>'
+      + '</div>'
     : '';
 
   // Rules section
@@ -1261,6 +1254,9 @@ function renderDetail(i) {
     ? '<div class="section-label">&#128221; Note</div>' +
       '<div class="note-block" style="border-left-color:var(--accent2);margin-bottom:20px">' + esc(notes[String(d.id)]) + '</div>'
     : '';
+
+  // Update fixed action bar to reflect this item's state
+  setTimeout(updateQuickBar, 0);
 
   document.getElementById('detailPanel').innerHTML = `
     <div class="detail-nav">
@@ -1717,10 +1713,11 @@ function updateQuickBar() {
   const hasNote   = !!(notes[String(d.id)] && notes[String(d.id)].trim());
   const isFlagged = flagged.has(String(d.id));
 
-  revBtn.textContent  = isRev     ? '✓ Reviewed'  : '✓ Review';
+  revBtn.textContent  = isRev     ? '✓ Reviewed — click to undo'  : '✓ Mark Reviewed';
   revBtn.className    = 'mark-reviewed-btn' + (isRev ? ' done' : '');
+  revBtn.title        = isRev ? 'Click to mark as pending again' : 'Mark as reviewed (R)';
 
-  noteBtn.textContent = hasNote   ? '📝 Edit Note' : '📝 Note';
+  noteBtn.textContent = hasNote   ? '📝 Edit Note' : '📝 Add Note';
   noteBtn.className   = 'note-btn' + (hasNote ? ' has-note' : '');
 
   flagBtn.textContent = isFlagged ? '⚑ Unflag'    : '⚑ Flag';
