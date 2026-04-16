@@ -1267,16 +1267,6 @@ function renderDetail(i) {
       <button class="nav-btn" onclick="navigate(-1)" ${i === 0 ? 'disabled' : ''}>&larr; Prev</button>
       <span class="nav-counter">${i + 1} / ${filteredData.length}</span>
       <button class="nav-btn" onclick="navigate(1)" ${i === filteredData.length - 1 ? 'disabled' : ''}>Next &rarr;</button>
-      <div style="flex:1"></div>
-      <button class="mark-reviewed-btn${isRev ? ' done' : ''}" onclick="markReviewed('${d.id}')">
-        ${isRev ? '&#10003; Reviewed' : '&#10003; Mark as Reviewed'}
-      </button>
-      <button class="note-btn${hasNote ? ' has-note' : ''}" onclick="toggleNotePanel('${d.id}')" title="Add or edit a note">
-        &#128221; ${hasNote ? 'Edit Note' : 'Add Note'}
-      </button>
-      <button class="flag-btn${isFlagged ? ' flagged' : ''}" onclick="toggleFlag('${d.id}')">
-        &#9873; ${isFlagged ? 'Unflag' : 'Flag'}
-      </button>
     </div>
 
     ${reviewedHtml}
