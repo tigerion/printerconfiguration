@@ -1014,11 +1014,13 @@ let curIdx       = 0;
 let curView      = 'dashboard';
 
 // dashboard state
-let dashSev      = 'all';
+let dashSev      = new Set();   // empty = all severities; otherwise the subset to show
 let dashStatus   = 'all';
 let dedupKey     = 'none';     // none | sha1 | threatComputer | ruleModule
 let burstCapOn   = true;
 let burstCap     = 10;         // max per signature per hour
+let burstBy      = 'executable'; // executable | host | cmdline | user  (what defines "same alert" in an hour)
+let cmdlinePrefix = 30;        // chars of command line compared (ignores random GUID/param tails)
 let machineCapOn = false;
 let machineCap   = 5;          // max same-detection repeats per machine per month
 
@@ -1477,12 +1479,20 @@ document.addEventListener('keydown', e => {
 // DASHBOARD
 // ============================================================
 function setDashSev(f) {
-  dashSev = dashSev === f ? 'all' : f;
-  ['all','threat','warning','info'].forEach(k => {
+  if (f === 'all') {
+    dashSev.clear();              // "All" = no restriction
+  } else if (dashSev.has(f)) {
+    dashSev.delete(f);            // toggle off
+  } else {
+    dashSev.add(f);               // toggle on (stacks with others)
+  }
+  const map = { threat:'active-red', warning:'active-yellow', info:'active' };
+  ['threat','warning','info'].forEach(k => {
     const el = document.getElementById('d' + k.charAt(0).toUpperCase() + k.slice(1));
-    const map = { all:'active', threat:'active-red', warning:'active-yellow', info:'active' };
-    if (el) el.className = 'filter-btn' + (dashSev === k ? ' ' + map[k] : '');
+    if (el) el.className = 'filter-btn' + (dashSev.has(k) ? ' ' + map[k] : '');
   });
+  const allEl = document.getElementById('dAll');
+  if (allEl) allEl.className = 'filter-btn' + (dashSev.size === 0 ? ' active' : '');
   renderDashboard();
 }
 function setDashStatus(f) {
@@ -1513,10 +1523,41 @@ function dedupSignature(d) {
   }
 }
 // --- burst signature: what counts as "the same alert firing" within an hour ---
+// Always anchored on the rule name (the ESET analogue of Splunk's search_name),
+// paired with one dimension chosen by the analyst. An update wave trips the same
+// rule against the same executable / host / command / user repeatedly within an hour.
 function burstSignature(d) {
-  // rule + module is the ESET analogue of search_name in Splunk:
-  // an update wave trips the same rule on the same module across many machines.
-  return (d.ruleName || d.typeLabel || '?') + '|' + (d.moduleSha1 || d.moduleName || d.threatName || '?');
+  const rule = d.ruleName || d.typeLabel || '?';
+  let second;
+  switch (burstBy) {
+    case 'host':
+      second = d.computerName || '?';
+      break;
+    case 'user':
+      second = d.processUser || '?';
+      break;
+    case 'cmdline':
+      // Compare only the leading N chars so random tails (GUIDs, temp paths,
+      // session tokens) don't split one real burst into many unique signatures.
+      second = normCmdline(d.processCommandLine || d.processPath || d.processName || '?');
+      break;
+    case 'executable':
+    default:
+      // The binary itself, independent of path/args.
+      second = (d.processName || baseName(d.processPath) || d.moduleName || '?').toLowerCase();
+      break;
+  }
+  return rule + '||' + second;
+}
+
+function baseName(p) {
+  if (!p) return '';
+  return String(p).split(/[\\/]/).pop();
+}
+function normCmdline(c) {
+  // lowercase + collapse whitespace, then take the configured prefix length
+  const s = String(c).toLowerCase().replace(/\s+/g, ' ').trim();
+  return s.slice(0, cmdlinePrefix);
 }
 
 // Apply current dashboard filters (sev / status / computer / search) to allData.
@@ -1525,7 +1566,7 @@ function dashFilteredRaw() {
   const comp = document.getElementById('dashComputer').value;
   return allData.filter(d => {
     if (!d._month) return false; // can't place undated detections on a monthly axis
-    if (dashSev !== 'all' && d._sev !== dashSev) return false;
+    if (dashSev.size > 0 && !dashSev.has(d._sev)) return false;
     if (dashStatus === 'unresolved' && d.resolved) return false;
     if (dashStatus === 'resolved'   && !d.resolved) return false;
     if (comp && d.computerName !== comp) return false;
@@ -1683,6 +1724,13 @@ function renderControls() {
     ['ruleModule','Rule + module'],
   ].map(([v,l]) => `<button class="${dedupKey===v?'active':''}" onclick="setDedup('${v}')">${l}</button>`).join('');
 
+  const burstByOpts = [
+    ['executable','Executable'],
+    ['host','Host'],
+    ['cmdline','Command line'],
+    ['user','User'],
+  ].map(([v,l]) => `<button class="${burstBy===v?'active':''}" onclick="setBurstBy('${v}')">${l}</button>`).join('');
+
   return `
   <div class="controls-panel">
     <div class="controls-head">
@@ -1705,9 +1753,19 @@ function renderControls() {
           <label class="switch"><input type="checkbox" id="burstToggle" ${burstCapOn?'checked':''} onchange="setBurstOn(this.checked)"><span class="slider"></span></label>
           <span class="toggle-label">Cap at</span>
           <input class="cap-input" type="number" min="1" id="burstCapInput" value="${burstCap}" ${burstCapOn?'':'disabled'} onchange="setBurstCap(this.value)">
-          <span class="toggle-label">per rule+module / hour</span>
+          <span class="toggle-label">per signature / hour</span>
         </div>
-        <span class="toggle-desc">A storm of 400 in one hour counts as ${burstCap}, matching the manual effort to bulk-close it.</span>
+        <div class="toggle-row" style="margin-top:8px">
+          <span class="toggle-label" style="color:var(--muted)">Group by Rule&nbsp;+</span>
+          <div class="seg">${burstByOpts}</div>
+        </div>
+        ${burstBy==='cmdline' ? `
+        <div class="toggle-row" style="margin-top:8px">
+          <span class="toggle-label" style="color:var(--muted)">Compare first</span>
+          <input class="cap-input" type="number" min="5" id="cmdPrefixInput" value="${cmdlinePrefix}" ${burstCapOn?'':'disabled'} onchange="setCmdPrefix(this.value)">
+          <span class="toggle-label" style="color:var(--muted)">chars of command line</span>
+        </div>` : ''}
+        <span class="toggle-desc">${burstDesc()}</span>
       </div>
 
       <div class="control-group">
@@ -1727,8 +1785,21 @@ function renderControls() {
 function setDedup(v)      { dedupKey = v; renderDashboard(); }
 function setBurstOn(b)    { burstCapOn = b; renderDashboard(); }
 function setBurstCap(v)   { const n = parseInt(v,10); if (!isNaN(n) && n>0) burstCap = n; renderDashboard(); }
+function setBurstBy(v)    { burstBy = v; renderDashboard(); }
+function setCmdPrefix(v)  { const n = parseInt(v,10); if (!isNaN(n) && n>=5) cmdlinePrefix = n; renderDashboard(); }
 function setMachineOn(b)  { machineCapOn = b; renderDashboard(); }
 function setMachineCap(v) { const n = parseInt(v,10); if (!isNaN(n) && n>0) machineCap = n; renderDashboard(); }
+
+function burstDesc() {
+  const tail = `A storm in one hour counts as ${burstCap}, matching the effort to bulk-close it.`;
+  switch (burstBy) {
+    case 'host':    return `Same rule firing repeatedly on one host in an hour is treated as one burst. ${tail}`;
+    case 'user':    return `Same rule under one user account in an hour is treated as one burst. ${tail}`;
+    case 'cmdline': return `Same rule + same first ${cmdlinePrefix} chars of command line — ignores random GUID/param tails so one rollout isn't split into singletons. ${tail}`;
+    case 'executable':
+    default:        return `Same rule triggered by the same executable in an hour is treated as one burst. ${tail}`;
+  }
+}
 
 // --- SVG stacked/overlaid bar chart: adjusted bar + raw ghost outline ---
 function renderChart(series) {
@@ -1839,7 +1910,8 @@ function renderBreakdownTables(rows) {
   });
   const burstList = Object.values(sig).map(s => {
     s.peak = Math.max(...Object.values(s.hours));
-    s.label = s.label.split('|')[0];
+    const parts = s.label.split('||');
+    s.label = parts[0] + (parts[1] && parts[1] !== '?' ? '  ·  ' + parts[1] : '');
     return s;
   }).sort((a,b) => b.raw - a.raw).slice(0, 8);
   const maxBurst = Math.max(1, ...burstList.map(s=>s.raw));
@@ -1877,7 +1949,7 @@ function renderBreakdownTables(rows) {
       <h3>Top burst sources</h3>
       <div class="panel-hint">Highest-volume rule signatures. A <span style="color:var(--flag)">PEAK</span> tag means one hour hit the burst cap &mdash; a likely update wave.</div>
       <table class="mini-table">
-        <thead><tr><th>Rule signature</th><th class="num">Raw</th></tr></thead>
+        <thead><tr><th>Rule&nbsp;·&nbsp;${burstBy==='cmdline'?'command':burstBy}</th><th class="num">Raw</th></tr></thead>
         <tbody>${burstRows}</tbody>
       </table>
     </div>
