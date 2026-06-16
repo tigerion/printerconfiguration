@@ -125,6 +125,23 @@
     white-space: nowrap;
   }
 
+  /* ---- VIEW TABS ---- */
+  .view-tabs { display: flex; gap: 4px; background: var(--surface2); padding: 3px; border-radius: 9px; border: 1px solid var(--border); }
+  .view-tab {
+    padding: 6px 16px;
+    border-radius: 7px;
+    border: none;
+    background: transparent;
+    color: var(--muted);
+    font-family: 'Syne', sans-serif;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .view-tab:hover  { color: var(--text); }
+  .view-tab.active { background: var(--accent); color: #fff; }
+
   .topbar-stats { display: flex; gap: 10px; flex-wrap: wrap; }
 
   .stat-chip {
@@ -592,6 +609,280 @@
   ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 
   .no-results { padding: 24px; text-align: center; color: var(--muted); font-size: 13px; }
+
+  /* ============================================================ */
+  /* ---- DASHBOARD (new) ---- */
+  /* ============================================================ */
+  .dashboard {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 24px 32px 48px;
+    background: var(--bg);
+  }
+  .dashboard::-webkit-scrollbar { width: 6px; }
+  .dashboard::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+  .dash-grid-top {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 14px;
+    margin-bottom: 24px;
+  }
+
+  .kpi-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 18px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    position: relative;
+    overflow: hidden;
+  }
+  .kpi-card::after {
+    content: '';
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    width: 3px;
+    background: var(--accent);
+  }
+  .kpi-card.kpi-raw::after      { background: var(--muted); }
+  .kpi-card.kpi-adjusted::after { background: var(--accent); }
+  .kpi-card.kpi-removed::after  { background: var(--flag); }
+  .kpi-card.kpi-threat::after   { background: var(--red); }
+
+  .kpi-label {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+  }
+  .kpi-value {
+    font-size: 30px;
+    font-weight: 800;
+    font-family: 'JetBrains Mono', monospace;
+    line-height: 1;
+    color: var(--text);
+  }
+  .kpi-value.accent { color: var(--accent); }
+  .kpi-value.flag   { color: var(--flag); }
+  .kpi-value.red    { color: var(--red); }
+  .kpi-sub {
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .kpi-sub .up   { color: var(--red); font-weight: 700; }
+  .kpi-sub .down { color: var(--green); font-weight: 700; }
+
+  /* ---- dedup controls panel ---- */
+  .controls-panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 18px 20px;
+    margin-bottom: 24px;
+  }
+  .controls-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 4px;
+    flex-wrap: wrap;
+  }
+  .controls-title { font-size: 14px; font-weight: 800; }
+  .controls-hint  { font-size: 12px; color: var(--muted); line-height: 1.5; margin-bottom: 16px; max-width: 720px; }
+  .controls-row {
+    display: flex;
+    gap: 24px;
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+  .control-group { display: flex; flex-direction: column; gap: 8px; min-width: 180px; }
+  .control-group > .field-label { margin-bottom: 2px; }
+
+  .seg {
+    display: inline-flex;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 3px;
+    flex-wrap: wrap;
+    gap: 2px;
+  }
+  .seg button {
+    padding: 6px 12px;
+    border: none;
+    background: transparent;
+    color: var(--muted);
+    font-family: 'Syne', sans-serif;
+    font-size: 12.5px;
+    font-weight: 600;
+    cursor: pointer;
+    border-radius: 6px;
+    transition: all 0.13s;
+    white-space: nowrap;
+  }
+  .seg button:hover  { color: var(--text); }
+  .seg button.active { background: var(--accent); color: #fff; }
+
+  .toggle-row { display: flex; align-items: center; gap: 10px; }
+  .switch { position: relative; width: 40px; height: 22px; flex-shrink: 0; }
+  .switch input { opacity: 0; width: 0; height: 0; }
+  .slider {
+    position: absolute; inset: 0;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 22px;
+    cursor: pointer;
+    transition: 0.2s;
+  }
+  .slider::before {
+    content: '';
+    position: absolute;
+    height: 14px; width: 14px;
+    left: 3px; top: 3px;
+    background: var(--muted);
+    border-radius: 50%;
+    transition: 0.2s;
+  }
+  .switch input:checked + .slider { background: rgba(79,142,247,0.3); border-color: var(--accent); }
+  .switch input:checked + .slider::before { transform: translateX(18px); background: var(--accent); }
+
+  .cap-input {
+    width: 70px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    padding: 6px 10px;
+    color: var(--text);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    outline: none;
+  }
+  .cap-input:focus { border-color: var(--accent); }
+  .cap-input:disabled { opacity: 0.4; }
+
+  .toggle-label { font-size: 12.5px; font-weight: 600; color: var(--text); }
+  .toggle-desc  { font-size: 11px; color: var(--muted); }
+
+  /* ---- chart ---- */
+  .chart-panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 20px 24px 16px;
+    margin-bottom: 24px;
+  }
+  .chart-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin-bottom: 18px;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .chart-title { font-size: 15px; font-weight: 800; }
+  .chart-legend { display: flex; gap: 16px; flex-wrap: wrap; }
+  .legend-item { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+  .legend-swatch { width: 12px; height: 12px; border-radius: 3px; }
+
+  .chart-scroll { overflow-x: auto; padding-bottom: 8px; }
+  .chart-svg { display: block; }
+  .bar-month-label { fill: var(--muted); font-size: 11px; font-family: 'JetBrains Mono', monospace; }
+  .bar-value-label { fill: var(--text); font-size: 11px; font-weight: 600; font-family: 'JetBrains Mono', monospace; }
+  .bar-removed-label { fill: var(--flag); font-size: 10px; font-family: 'JetBrains Mono', monospace; }
+  .grid-line { stroke: var(--border); stroke-width: 1; }
+  .grid-label { fill: var(--muted); font-size: 10px; font-family: 'JetBrains Mono', monospace; }
+  .bar-seg { transition: opacity 0.13s; cursor: pointer; }
+  .bar-seg:hover { opacity: 0.82; }
+  .bar-ghost { fill: none; stroke: var(--muted); stroke-width: 1; stroke-dasharray: 3 3; opacity: 0.5; }
+
+  /* ---- breakdown tables ---- */
+  .dash-grid-bottom {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 24px;
+  }
+  .table-panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 18px 20px;
+  }
+  .table-panel h3 {
+    font-size: 13px;
+    font-weight: 800;
+    margin-bottom: 4px;
+  }
+  .table-panel .panel-hint { font-size: 11px; color: var(--muted); margin-bottom: 14px; }
+  .mini-table { width: 100%; border-collapse: collapse; }
+  .mini-table th {
+    text-align: left;
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--border);
+  }
+  .mini-table th.num, .mini-table td.num { text-align: right; font-family: 'JetBrains Mono', monospace; }
+  .mini-table td {
+    font-size: 12.5px;
+    padding: 8px;
+    border-bottom: 1px solid var(--border);
+    color: var(--text);
+  }
+  .mini-table tr:last-child td { border-bottom: none; }
+  .mini-table td.name { font-weight: 600; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .mini-table .barcell { position: relative; }
+  .mini-bar {
+    height: 5px;
+    background: var(--accent);
+    border-radius: 3px;
+    margin-top: 3px;
+  }
+  .mini-bar.burst { background: var(--flag); }
+  .tag-burst {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-size: 9px;
+    font-weight: 700;
+    background: rgba(245,158,11,0.15);
+    color: var(--flag);
+    font-family: 'JetBrains Mono', monospace;
+    vertical-align: middle;
+  }
+
+  .tooltip {
+    position: fixed;
+    pointer-events: none;
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-size: 12px;
+    z-index: 200;
+    max-width: 280px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+    opacity: 0;
+    transition: opacity 0.1s;
+  }
+  .tooltip.show { opacity: 1; }
+  .tooltip .tt-title { font-weight: 800; margin-bottom: 6px; font-size: 12.5px; }
+  .tooltip .tt-row { display: flex; justify-content: space-between; gap: 16px; font-family: 'JetBrains Mono', monospace; color: var(--muted); }
+  .tooltip .tt-row span:last-child { color: var(--text); font-weight: 600; }
+
+  .dash-empty {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    height: 60vh; gap: 12px; color: var(--muted);
+  }
+  .dash-empty-icon { font-size: 48px; opacity: 0.3; }
 </style>
 </head>
 <body>
@@ -600,7 +891,7 @@
 <div id="dropzone">
   <div class="drop-logo">ESET Inspect</div>
   <h1 class="drop-title">Detection<br>Reviewer</h1>
-  <p class="drop-sub">Load your exported JSON file to review detections with analyst notes and comments.</p>
+  <p class="drop-sub">Load your exported JSON file to review detections with analyst notes, comments, and a monthly trend dashboard.</p>
   <div class="drop-box" id="dropBox" onclick="document.getElementById('fileInput').click()">
     <div class="drop-icon">&#128203;</div>
     <div class="drop-label">Drop JSON export here</div>
@@ -616,6 +907,10 @@
   <!-- Topbar -->
   <div class="topbar">
     <div class="topbar-brand">ESET &mdash; Detection Reviewer</div>
+    <div class="view-tabs">
+      <button class="view-tab active" id="tabDash"   onclick="setView('dashboard')">Dashboard</button>
+      <button class="view-tab"        id="tabReview" onclick="setView('reviewer')">Reviewer</button>
+    </div>
     <div class="topbar-stats" id="topbarStats"></div>
     <div class="topbar-spacer"></div>
     <div class="topbar-actions">
@@ -624,36 +919,69 @@
     </div>
   </div>
 
-  <!-- Filter bar -->
-  <div class="filterbar">
-    <div class="search-wrap">
-      <span class="search-icon">&#128269;</span>
-      <input class="search-input" type="text" id="searchInput" placeholder="Search threat, computer, rule, note, analyst..." oninput="applyFilters()">
+  <!-- ============================================================ -->
+  <!-- DASHBOARD VIEW -->
+  <!-- ============================================================ -->
+  <div id="dashboardView">
+
+    <!-- Dashboard filter bar -->
+    <div class="filterbar">
+      <div class="search-wrap">
+        <span class="search-icon">&#128269;</span>
+        <input class="search-input" type="text" id="dashSearch" placeholder="Filter by threat, rule, computer, module, user..." oninput="renderDashboard()">
+      </div>
+      <span class="filter-label">Severity:</span>
+      <button class="filter-btn active" id="dAll"     onclick="setDashSev('all')">All</button>
+      <button class="filter-btn"        id="dThreat"  onclick="setDashSev('threat')">Threat</button>
+      <button class="filter-btn"        id="dWarning" onclick="setDashSev('warning')">Warning</button>
+      <button class="filter-btn"        id="dInfo"    onclick="setDashSev('info')">Info</button>
+      <span class="filter-label">Status:</span>
+      <button class="filter-btn"        id="dUnres"   onclick="setDashStatus('unresolved')">Unresolved</button>
+      <button class="filter-btn"        id="dRes"     onclick="setDashStatus('resolved')">Resolved</button>
+      <span class="filter-label">Computer:</span>
+      <select class="cap-input" id="dashComputer" style="width:auto;min-width:140px" onchange="renderDashboard()">
+        <option value="">All computers</option>
+      </select>
     </div>
-    <span class="filter-label">Severity:</span>
-    <button class="filter-btn active" id="fAll"     onclick="setSevFilter('all')">All</button>
-    <button class="filter-btn"        id="fThreat"  onclick="setSevFilter('threat')">Threat</button>
-    <button class="filter-btn"        id="fWarning" onclick="setSevFilter('warning')">Warning</button>
-    <button class="filter-btn"        id="fInfo"    onclick="setSevFilter('info')">Info</button>
-    <span class="filter-label">Status:</span>
-    <button class="filter-btn"        id="fUnres"   onclick="setStatusFilter('unresolved')">Unresolved</button>
-    <button class="filter-btn"        id="fRes"     onclick="setStatusFilter('resolved')">Resolved</button>
-    <button class="filter-btn"        id="fNote"    onclick="setStatusFilter('hasnote')">Has Note</button>
-    <button class="filter-btn"        id="fNoNote"  onclick="setStatusFilter('nonote')">No Note</button>
-    <button class="filter-btn"        id="fFlagged" onclick="setStatusFilter('flagged')">Flagged</button>
+
+    <div class="dashboard" id="dashboardBody"></div>
   </div>
 
-  <!-- Main -->
-  <div class="main">
-    <aside class="sidebar">
-      <ul class="sidebar-list" id="sidebarList"></ul>
-    </aside>
-    <section class="detail" id="detailPanel">
-      <div class="detail-empty">
-        <div class="detail-empty-icon">&#128203;</div>
-        <div class="detail-empty-text">Select a detection from the list</div>
+  <!-- ============================================================ -->
+  <!-- REVIEWER VIEW -->
+  <!-- ============================================================ -->
+  <div id="reviewerView" style="display:none; flex-direction:column; flex:1; min-height:0; overflow:hidden;">
+    <!-- Filter bar -->
+    <div class="filterbar">
+      <div class="search-wrap">
+        <span class="search-icon">&#128269;</span>
+        <input class="search-input" type="text" id="searchInput" placeholder="Search threat, computer, rule, note, analyst..." oninput="applyFilters()">
       </div>
-    </section>
+      <span class="filter-label">Severity:</span>
+      <button class="filter-btn active" id="fAll"     onclick="setSevFilter('all')">All</button>
+      <button class="filter-btn"        id="fThreat"  onclick="setSevFilter('threat')">Threat</button>
+      <button class="filter-btn"        id="fWarning" onclick="setSevFilter('warning')">Warning</button>
+      <button class="filter-btn"        id="fInfo"    onclick="setSevFilter('info')">Info</button>
+      <span class="filter-label">Status:</span>
+      <button class="filter-btn"        id="fUnres"   onclick="setStatusFilter('unresolved')">Unresolved</button>
+      <button class="filter-btn"        id="fRes"     onclick="setStatusFilter('resolved')">Resolved</button>
+      <button class="filter-btn"        id="fNote"    onclick="setStatusFilter('hasnote')">Has Note</button>
+      <button class="filter-btn"        id="fNoNote"  onclick="setStatusFilter('nonote')">No Note</button>
+      <button class="filter-btn"        id="fFlagged" onclick="setStatusFilter('flagged')">Flagged</button>
+    </div>
+
+    <!-- Main -->
+    <div class="main">
+      <aside class="sidebar">
+        <ul class="sidebar-list" id="sidebarList"></ul>
+      </aside>
+      <section class="detail" id="detailPanel">
+        <div class="detail-empty">
+          <div class="detail-empty-icon">&#128203;</div>
+          <div class="detail-empty-text">Select a detection from the list</div>
+        </div>
+      </section>
+    </div>
   </div>
 </div>
 
@@ -670,6 +998,9 @@
   </div>
 </div>
 
+<!-- Chart tooltip -->
+<div class="tooltip" id="chartTooltip"></div>
+
 <script>
 // ============================================================
 // STATE
@@ -680,6 +1011,16 @@ let flagged      = new Set();
 let sevFilter    = 'all';
 let statusFilter = 'all';
 let curIdx       = 0;
+let curView      = 'dashboard';
+
+// dashboard state
+let dashSev      = 'all';
+let dashStatus   = 'all';
+let dedupKey     = 'none';     // none | sha1 | threatComputer | ruleModule
+let burstCapOn   = true;
+let burstCap     = 10;         // max per signature per hour
+let machineCapOn = false;
+let machineCap   = 5;          // max same-detection repeats per machine per month
 
 // ============================================================
 // FILE LOADING
@@ -708,17 +1049,12 @@ function showStatus(msg, isError) {
 
 function loadFile(file) {
   showStatus('Reading file: <strong>' + file.name + '</strong> (' + (file.size / 1024).toFixed(1) + ' KB)...', false);
-
   const reader = new FileReader();
-
   reader.onerror = () => showStatus('FileReader error: could not read the file.', true);
-
   reader.onload = e => {
     try {
       const raw = e.target.result;
       showStatus('File read OK (' + (raw.length / 1024).toFixed(1) + ' KB). Parsing JSON...', false);
-
-      // Parse JSON
       let parsed;
       try {
         parsed = JSON.parse(raw);
@@ -732,13 +1068,7 @@ function loadFile(file) {
           true);
         return;
       }
-
       showStatus('JSON parsed OK. Unwrapping structure...', false);
-
-      // Unwrap all possible shapes:
-      //   Plain array        [ {...}, {...} ]
-      //   Wrapped object     { "value": [...] }  or any key containing an array
-      //   Single object      { "id": 1, ... }
       let records = [];
       if (Array.isArray(parsed)) {
         records = parsed;
@@ -762,25 +1092,17 @@ function loadFile(file) {
           return;
         }
       }
-
       if (records.length === 0) {
         showStatus('<strong>File parsed OK but contains 0 detections.</strong><br>Check that the export ran successfully and contains data.', true);
         return;
       }
-
       showStatus('Normalising ' + records.length + ' records...', false);
-
-      // Normalise each record individually -- one bad record does not crash the whole load
       const errors = [];
       allData = [];
       records.forEach((d, i) => {
-        try {
-          allData.push(normalise(d));
-        } catch(normErr) {
-          errors.push('Record ' + i + ': ' + normErr.message);
-        }
+        try { allData.push(normalise(d)); }
+        catch(normErr) { errors.push('Record ' + i + ': ' + normErr.message); }
       });
-
       if (allData.length === 0) {
         showStatus(
           '<strong>All ' + records.length + ' records failed to normalise.</strong><br>' +
@@ -789,36 +1111,27 @@ function loadFile(file) {
           true);
         return;
       }
-
-      if (errors.length > 0) {
-        console.warn('Skipped ' + errors.length + ' records:', errors.slice(0,5));
-      }
-
+      if (errors.length > 0) console.warn('Skipped ' + errors.length + ' records:', errors.slice(0,5));
       showStatus('Loaded ' + allData.length + ' detections. Opening...', false);
       initApp();
-
     } catch(err) {
       showStatus('<strong>Unexpected error:</strong><br>' + err.message + '<br><pre style="font-size:10px;white-space:pre-wrap">' + (err.stack||'') + '</pre>', true);
     }
   };
-
   reader.readAsText(file);
 }
 
 function normalise(d) {
   const bool = v => v === true || v === 'True' || v === 'true';
   const sev  = (d.severityLabel || scoreToSev(+d.severityScore || 0)).toLowerCase();
-
-  // commentsArray may be a real array, a JSON string, or null
   let commentsArray = d.commentsArray;
   if (typeof commentsArray === 'string') {
     try { commentsArray = JSON.parse(commentsArray); } catch(e) { commentsArray = []; }
   }
   if (!Array.isArray(commentsArray)) commentsArray = [];
-
   const noteStr     = d.note != null ? String(d.note) : '';
   const commentsTxt = d.commentsText != null ? String(d.commentsText) : '';
-
+  const t = d.creationTime ? new Date(d.creationTime) : null;
   return { ...d,
     commentsArray,
     resolved:     bool(d.resolved),
@@ -827,6 +1140,9 @@ function normalise(d) {
     _sev:         sev,
     _hasNote:     !!(noteStr.trim()),
     _hasComments: !!(commentsTxt.trim()) || commentsArray.length > 0,
+    _date:        t && !isNaN(t) ? t : null,
+    _month:       t && !isNaN(t) ? t.getFullYear() + '-' + String(t.getMonth()+1).padStart(2,'0') : null,
+    _hourBucket:  t && !isNaN(t) ? t.getFullYear() + '-' + t.getMonth() + '-' + t.getDate() + '-' + t.getHours() : null,
   };
 }
 
@@ -841,9 +1157,11 @@ function initApp() {
   document.getElementById('searchInput').value = '';
   resetFilterBtns();
   applyFilters();
+  populateComputerFilter();
   dropzone.style.display = 'none';
   app.style.display = 'flex';
   updateStats();
+  setView('dashboard');
 }
 
 function resetApp() {
@@ -854,17 +1172,26 @@ function resetApp() {
 }
 
 // ============================================================
-// FILTERS
+// VIEW SWITCHING
 // ============================================================
-function setSevFilter(f) {
-  sevFilter = sevFilter === f ? 'all' : f;
-  resetFilterBtns(); applyFilters();
+function setView(v) {
+  curView = v;
+  const isDash = v === 'dashboard';
+  document.getElementById('dashboardView').style.display = isDash ? 'flex' : 'none';
+  document.getElementById('dashboardView').style.flexDirection = 'column';
+  document.getElementById('dashboardView').style.flex = '1';
+  document.getElementById('dashboardView').style.minHeight = '0';
+  document.getElementById('reviewerView').style.display  = isDash ? 'none' : 'flex';
+  document.getElementById('tabDash').className   = 'view-tab' + (isDash ? ' active' : '');
+  document.getElementById('tabReview').className = 'view-tab' + (isDash ? '' : ' active');
+  if (isDash) renderDashboard();
 }
 
-function setStatusFilter(f) {
-  statusFilter = statusFilter === f ? 'all' : f;
-  resetFilterBtns(); applyFilters();
-}
+// ============================================================
+// REVIEWER FILTERS
+// ============================================================
+function setSevFilter(f) { sevFilter = sevFilter === f ? 'all' : f; resetFilterBtns(); applyFilters(); }
+function setStatusFilter(f) { statusFilter = statusFilter === f ? 'all' : f; resetFilterBtns(); applyFilters(); }
 
 function resetFilterBtns() {
   const smap = { all: 'active', threat: 'active-red', warning: 'active-yellow', info: 'active' };
@@ -888,7 +1215,7 @@ function applyFilters() {
     if (statusFilter === 'resolved'   && !d.resolved)                     return false;
     if (statusFilter === 'hasnote'    && !d._hasNote && !d._hasComments)  return false;
     if (statusFilter === 'nonote'     && (d._hasNote || d._hasComments))  return false;
-    if (statusFilter === 'flagged'    && !flagged.has(String(d.id)))              return false;
+    if (statusFilter === 'flagged'    && !flagged.has(String(d.id)))      return false;
     if (q) {
       const hay = [d.threatName, d.ruleName, d.typeLabel, d.computerName,
                    d.processUser, d.note, d.commentsText, d.moduleName,
@@ -914,7 +1241,6 @@ function applyFilters() {
 function renderSidebar() {
   const list = document.getElementById('sidebarList');
   if (filtered.length === 0) { list.innerHTML = '<li class="no-results">No results</li>'; return; }
-
   list.innerHTML = filtered.map((d, i) => {
     const sevCls  = d._sev === 'threat' ? 'badge-threat' : d._sev === 'warning' ? 'badge-warning' : 'badge-info';
     const resCls  = d.resolved ? 'badge-resolved' : 'badge-unres';
@@ -953,19 +1279,14 @@ function navigate(dir) {
 function renderDetail(i) {
   const d = filtered[i];
   if (!d) return;
-
   const isFlagged = flagged.has(String(d.id));
   const sevCls    = d._sev === 'threat' ? 'badge-threat' : d._sev === 'warning' ? 'badge-warning' : 'badge-info';
   const valCls    = d._sev === 'threat' ? 'red' : d._sev === 'warning' ? 'yellow' : 'blue';
   const resCls    = d.resolved ? 'badge-resolved' : 'badge-unres';
   const date      = d.creationTime ? new Date(d.creationTime).toLocaleString() : 'Unknown';
-
-  // ---- Analyst note ----
   const noteHtml = `
     <div class="section-label">Analyst Note / Conclusion</div>
     <div class="note-block${d._hasNote ? '' : ' empty'}">${d._hasNote ? esc(String(d.note)) : 'No analyst note recorded for this detection.'}</div>`;
-
-  // ---- Comments thread ----
   const comments = getComments(d);
   let commentsHtml = '';
   if (comments.length > 0) {
@@ -990,8 +1311,6 @@ function renderDetail(i) {
       <div class="section-label">Analyst Discussion (${comments.length} comment${comments.length !== 1 ? 's' : ''})</div>
       <div class="comment-thread">${cards}</div>`;
   }
-
-  // ---- Facts grid ----
   const facts = [
     { l: 'Detection ID',   v: d.id,                 c: 'blue' },
     { l: 'Created',        v: date,                  c: '' },
@@ -1016,8 +1335,6 @@ function renderDetail(i) {
       <div class="field-value${val ? (f.c ? ' '+f.c : '') : ' empty'}">${val ? esc(String(f.v)) : 'n/a'}</div>
     </div>`;
   }).join('');
-
-  // ---- Threat & module block ----
   const modLines = [
     d.threatName           ? `Threat     : ${d.threatName}`                       : null,
     d.threatUri            ? `URI        : ${d.threatUri}`                         : null,
@@ -1028,8 +1345,6 @@ function renderDetail(i) {
     d.moduleSignatureLabel ? `Signature  : ${d.moduleSignatureLabel}`              : null,
     d.moduleLgPopularity != null ? `LG Pop     : ${d.moduleLgPopularity}`          : null,
   ].filter(Boolean).join('\n');
-
-  // ---- Process block ----
   const procLines = [
     d.processName        ? `Process    : ${d.processName}`                         : null,
     d.processPath        ? `Path       : ${d.processPath}`                         : null,
@@ -1039,7 +1354,6 @@ function renderDetail(i) {
     d.moduleFirstSeenLocally      ? `First Seen : ${d.moduleFirstSeenLocally}`     : null,
     d.moduleLastExecutedLocally   ? `Last Exec  : ${d.moduleLastExecutedLocally}`  : null,
   ].filter(Boolean).join('\n');
-
   document.getElementById('detailPanel').innerHTML = `
     <div class="detail-nav">
       <button class="nav-btn" onclick="navigate(-1)" ${i===0?'disabled':''}>&larr; Prev</button>
@@ -1050,7 +1364,6 @@ function renderDetail(i) {
         &#9873; ${isFlagged ? 'Unflag' : 'Flag for review'}
       </button>
     </div>
-
     <div class="detail-header">
       <div class="detail-title">${esc(d.threatName || d.ruleName || d.typeLabel || 'Unknown Detection')}</div>
       <div class="detail-badges">
@@ -1058,18 +1371,14 @@ function renderDetail(i) {
         <span class="badge ${resCls}" style="font-size:12px;padding:4px 10px">${d.resolved?'RESOLVED':'OPEN'}</span>
       </div>
     </div>
-
     ${noteHtml}
     ${commentsHtml}
-
     <div class="section-label">Detection Facts</div>
     <div class="fields-grid">${facts}</div>
-
     ${modLines ? `<div class="mono-block">
       <div class="mono-toolbar"><span class="mono-toolbar-label">Threat &amp; Module</span></div>
       <div class="mono-body">${esc(modLines)}</div>
     </div>` : ''}
-
     ${procLines ? `<div class="mono-block">
       <div class="mono-toolbar"><span class="mono-toolbar-label">Process Context</span></div>
       <div class="mono-body">${esc(procLines)}</div>
@@ -1139,9 +1448,7 @@ function openFlagModal() {
     </li>`).join('');
   document.getElementById('flagModal').classList.add('open');
 }
-
 function closeFlagModal() { document.getElementById('flagModal').classList.remove('open'); }
-
 function downloadFlagged() {
   const items = allData.filter(d => flagged.has(String(d.id)));
   if (!items.length) { alert('No flagged detections to export.'); return; }
@@ -1159,11 +1466,431 @@ function downloadFlagged() {
 document.addEventListener('keydown', e => {
   if (app.style.display === 'none') return;
   if (document.getElementById('flagModal').classList.contains('open')) return;
-  if (e.target.tagName === 'INPUT') return;
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+  if (curView !== 'reviewer') return;
   if (e.key === 'ArrowRight' || e.key === 'ArrowDown') { e.preventDefault(); navigate(1); }
   if (e.key === 'ArrowLeft'  || e.key === 'ArrowUp')   { e.preventDefault(); navigate(-1); }
   if (e.key === 'f' || e.key === 'F') { const d = filtered[curIdx]; if (d) toggleFlag(d.id); }
 });
+
+// ============================================================
+// DASHBOARD
+// ============================================================
+function setDashSev(f) {
+  dashSev = dashSev === f ? 'all' : f;
+  ['all','threat','warning','info'].forEach(k => {
+    const el = document.getElementById('d' + k.charAt(0).toUpperCase() + k.slice(1));
+    const map = { all:'active', threat:'active-red', warning:'active-yellow', info:'active' };
+    if (el) el.className = 'filter-btn' + (dashSev === k ? ' ' + map[k] : '');
+  });
+  renderDashboard();
+}
+function setDashStatus(f) {
+  dashStatus = dashStatus === f ? 'all' : f;
+  const map = { unresolved:'active-red', resolved:'active-green' };
+  const ids = { unresolved:'dUnres', resolved:'dRes' };
+  Object.keys(ids).forEach(k => {
+    const el = document.getElementById(ids[k]);
+    if (el) el.className = 'filter-btn' + (dashStatus === k ? ' ' + map[k] : '');
+  });
+  renderDashboard();
+}
+
+function populateComputerFilter() {
+  const sel = document.getElementById('dashComputer');
+  const names = [...new Set(allData.map(d => d.computerName).filter(Boolean))].sort();
+  sel.innerHTML = '<option value="">All computers</option>' +
+    names.map(n => `<option value="${esc(n)}">${esc(n)}</option>`).join('');
+}
+
+// --- dedup signature key for a detection ---
+function dedupSignature(d) {
+  switch (dedupKey) {
+    case 'sha1':           return d.moduleSha1 || ('id:' + d.id);
+    case 'threatComputer': return (d.threatName || d.ruleName || '?') + '|' + (d.computerName || '?');
+    case 'ruleModule':     return (d.ruleName || '?') + '|' + (d.moduleSha1 || d.moduleName || '?');
+    default:               return null;   // 'none' -> every detection is unique
+  }
+}
+// --- burst signature: what counts as "the same alert firing" within an hour ---
+function burstSignature(d) {
+  // rule + module is the ESET analogue of search_name in Splunk:
+  // an update wave trips the same rule on the same module across many machines.
+  return (d.ruleName || d.typeLabel || '?') + '|' + (d.moduleSha1 || d.moduleName || d.threatName || '?');
+}
+
+// Apply current dashboard filters (sev / status / computer / search) to allData.
+function dashFilteredRaw() {
+  const q = (document.getElementById('dashSearch').value || '').toLowerCase().trim();
+  const comp = document.getElementById('dashComputer').value;
+  return allData.filter(d => {
+    if (!d._month) return false; // can't place undated detections on a monthly axis
+    if (dashSev !== 'all' && d._sev !== dashSev) return false;
+    if (dashStatus === 'unresolved' && d.resolved) return false;
+    if (dashStatus === 'resolved'   && !d.resolved) return false;
+    if (comp && d.computerName !== comp) return false;
+    if (q) {
+      const hay = [d.threatName, d.ruleName, d.typeLabel, d.computerName, d.processUser,
+                   d.moduleName, d.moduleSha1].filter(Boolean).join(' ').toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  });
+}
+
+// Core: turn a filtered list into per-month adjusted counts, applying
+// dedup -> machine cap -> hourly burst cap, in that order.
+function computeMonthly(rows) {
+  // 1. DEDUP: collapse exact duplicates by chosen signature, scoped WITHIN each month
+  // (a module that reappears in a later month is still a real detection that month).
+  let working = rows;
+  if (dedupKey !== 'none') {
+    const seen = new Set();
+    working = rows.filter(d => {
+      const sig = d._month + '||' + dedupSignature(d);
+      if (seen.has(sig)) return false;
+      seen.add(sig);
+      return true;
+    });
+  }
+
+  // 2. MACHINE CAP: within a month, cap repeats of the same detection signature on one machine
+  if (machineCapOn) {
+    const perMachine = {}; // month|computer|threat -> count kept
+    working = working.filter(d => {
+      const key = d._month + '|' + (d.computerName||'?') + '|' + (d.threatName || d.ruleName || '?');
+      perMachine[key] = (perMachine[key] || 0) + 1;
+      return perMachine[key] <= machineCap;
+    });
+  }
+
+  // 3. HOURLY BURST CAP: within each (hour, burst-signature) bucket cap the count.
+  // This is the Splunk two-stage bin: bucket to hour+signature, cap, then roll to month.
+  // Build month -> { raw, adjusted } and capture how much each stage removed.
+  const months = {};
+  const ensure = m => months[m] || (months[m] = { raw:0, adjusted:0, threat:0, sigBuckets:{} });
+
+  // first pass: raw + group into hour buckets per month
+  working.forEach(d => {
+    const m = ensure(d._month);
+    m.raw++;
+    if (d._sev === 'threat') m.threat++;
+    if (burstCapOn) {
+      const bkey = d._hourBucket + '||' + burstSignature(d);
+      m.sigBuckets[bkey] = (m.sigBuckets[bkey] || 0) + 1;
+    }
+  });
+
+  // second pass: adjusted count
+  Object.keys(months).forEach(m => {
+    const mo = months[m];
+    if (burstCapOn) {
+      let adj = 0;
+      Object.values(mo.sigBuckets).forEach(c => { adj += Math.min(c, burstCap); });
+      mo.adjusted = adj;
+    } else {
+      mo.adjusted = mo.raw;
+    }
+    delete mo.sigBuckets;
+  });
+
+  return months;
+}
+
+function renderDashboard() {
+  if (curView !== 'dashboard') return;
+  const body = document.getElementById('dashboardBody');
+  const rows = dashFilteredRaw();
+
+  if (rows.length === 0) {
+    body.innerHTML = `<div class="dash-empty">
+      <div class="dash-empty-icon">&#128202;</div>
+      <div>No dated detections match the current filters.</div>
+    </div>`;
+    return;
+  }
+
+  const monthsObj = computeMonthly(rows);
+  const monthKeys = Object.keys(monthsObj).sort();
+  const series = monthKeys.map(m => ({
+    month: m,
+    raw: monthsObj[m].raw,
+    adjusted: monthsObj[m].adjusted,
+    threat: monthsObj[m].threat,
+    removed: monthsObj[m].raw - monthsObj[m].adjusted,
+  }));
+
+  const totalRaw      = series.reduce((s,x)=>s+x.raw,0);
+  const totalAdjusted = series.reduce((s,x)=>s+x.adjusted,0);
+  const totalRemoved  = totalRaw - totalAdjusted;
+  const totalThreat   = series.reduce((s,x)=>s+x.threat,0);
+
+  // trend: compare last month vs first month on adjusted figures
+  let trendHtml = '<span class="kpi-sub">single month of data</span>';
+  if (series.length >= 2) {
+    const first = series[0].adjusted, last = series[series.length-1].adjusted;
+    if (first > 0) {
+      const pct = Math.round(((last - first) / first) * 100);
+      const dir = pct < 0 ? 'down' : 'up';
+      const arrow = pct < 0 ? '&darr;' : '&uarr;';
+      const word = pct < 0 ? 'lower' : 'higher';
+      trendHtml = `<span class="kpi-sub"><span class="${dir}">${arrow} ${Math.abs(pct)}%</span> ${word} than ${series[0].month}</span>`;
+    }
+  }
+
+  const kpis = `
+    <div class="dash-grid-top">
+      <div class="kpi-card kpi-adjusted">
+        <div class="kpi-label">Adjusted Load (latest)</div>
+        <div class="kpi-value accent">${series[series.length-1].adjusted.toLocaleString()}</div>
+        ${trendHtml}
+      </div>
+      <div class="kpi-card kpi-raw">
+        <div class="kpi-label">Total Raw Detections</div>
+        <div class="kpi-value">${totalRaw.toLocaleString()}</div>
+        <div class="kpi-sub">across ${series.length} month${series.length!==1?'s':''}</div>
+      </div>
+      <div class="kpi-card kpi-adjusted">
+        <div class="kpi-label">Total Adjusted Load</div>
+        <div class="kpi-value accent">${totalAdjusted.toLocaleString()}</div>
+        <div class="kpi-sub">what analysts actually worked</div>
+      </div>
+      <div class="kpi-card kpi-removed">
+        <div class="kpi-label">Noise Removed</div>
+        <div class="kpi-value flag">${totalRemoved.toLocaleString()}</div>
+        <div class="kpi-sub">${totalRaw>0?Math.round(totalRemoved/totalRaw*100):0}% were bursts / duplicates</div>
+      </div>
+      <div class="kpi-card kpi-threat">
+        <div class="kpi-label">Threat-Level</div>
+        <div class="kpi-value red">${totalThreat.toLocaleString()}</div>
+        <div class="kpi-sub">high-severity detections</div>
+      </div>
+    </div>`;
+
+  const controls = renderControls();
+  const chart    = renderChart(series);
+  const tables   = renderBreakdownTables(rows);
+
+  body.innerHTML = kpis + controls + chart + tables;
+  wireChartTooltips(series);
+}
+
+function renderControls() {
+  const dedupOpts = [
+    ['none','Off'],
+    ['sha1','Module hash'],
+    ['threatComputer','Threat + computer'],
+    ['ruleModule','Rule + module'],
+  ].map(([v,l]) => `<button class="${dedupKey===v?'active':''}" onclick="setDedup('${v}')">${l}</button>`).join('');
+
+  return `
+  <div class="controls-panel">
+    <div class="controls-head">
+      <span class="controls-title">Duplicate &amp; burst handling</span>
+    </div>
+    <div class="controls-hint">
+      Bursts (a driver/software update tripping the same rule across many machines in an hour) and repeated detections can drown out the real trend.
+      These three controls de-noise the monthly counts so the chart reflects analyst load, not raw event volume. The dashed outline on each bar shows the raw count for comparison.
+    </div>
+    <div class="controls-row">
+      <div class="control-group">
+        <span class="field-label">Deduplicate by</span>
+        <div class="seg">${dedupOpts}</div>
+        <span class="toggle-desc">Collapses exact repeats sharing the chosen key into one.</span>
+      </div>
+
+      <div class="control-group">
+        <span class="field-label">Hourly burst cap</span>
+        <div class="toggle-row">
+          <label class="switch"><input type="checkbox" id="burstToggle" ${burstCapOn?'checked':''} onchange="setBurstOn(this.checked)"><span class="slider"></span></label>
+          <span class="toggle-label">Cap at</span>
+          <input class="cap-input" type="number" min="1" id="burstCapInput" value="${burstCap}" ${burstCapOn?'':'disabled'} onchange="setBurstCap(this.value)">
+          <span class="toggle-label">per rule+module / hour</span>
+        </div>
+        <span class="toggle-desc">A storm of 400 in one hour counts as ${burstCap}, matching the manual effort to bulk-close it.</span>
+      </div>
+
+      <div class="control-group">
+        <span class="field-label">Per-machine cap</span>
+        <div class="toggle-row">
+          <label class="switch"><input type="checkbox" id="machineToggle" ${machineCapOn?'checked':''} onchange="setMachineOn(this.checked)"><span class="slider"></span></label>
+          <span class="toggle-label">Cap at</span>
+          <input class="cap-input" type="number" min="1" id="machineCapInput" value="${machineCap}" ${machineCapOn?'':'disabled'} onchange="setMachineCap(this.value)">
+          <span class="toggle-label">per machine / month</span>
+        </div>
+        <span class="toggle-desc">Limits one noisy endpoint repeating the same detection all month.</span>
+      </div>
+    </div>
+  </div>`;
+}
+
+function setDedup(v)      { dedupKey = v; renderDashboard(); }
+function setBurstOn(b)    { burstCapOn = b; renderDashboard(); }
+function setBurstCap(v)   { const n = parseInt(v,10); if (!isNaN(n) && n>0) burstCap = n; renderDashboard(); }
+function setMachineOn(b)  { machineCapOn = b; renderDashboard(); }
+function setMachineCap(v) { const n = parseInt(v,10); if (!isNaN(n) && n>0) machineCap = n; renderDashboard(); }
+
+// --- SVG stacked/overlaid bar chart: adjusted bar + raw ghost outline ---
+function renderChart(series) {
+  const W_BAR = 64, GAP = 28, PAD_L = 52, PAD_R = 20, PAD_T = 20, PAD_B = 44;
+  const H = 320;
+  const plotH = H - PAD_T - PAD_B;
+  const W = PAD_L + PAD_R + series.length * W_BAR + (series.length-1) * GAP;
+  const maxVal = Math.max(1, ...series.map(s => Math.max(s.raw, s.adjusted)));
+  // nice round top
+  const niceMax = niceCeil(maxVal);
+  const y = v => PAD_T + plotH - (v / niceMax) * plotH;
+
+  // gridlines
+  const ticks = 4;
+  let grid = '';
+  for (let i = 0; i <= ticks; i++) {
+    const val = Math.round(niceMax * i / ticks);
+    const yy = y(val);
+    grid += `<line class="grid-line" x1="${PAD_L}" y1="${yy}" x2="${W-PAD_R}" y2="${yy}"/>`;
+    grid += `<text class="grid-label" x="${PAD_L-8}" y="${yy+3}" text-anchor="end">${val}</text>`;
+  }
+
+  const bars = series.map((s, i) => {
+    const x = PAD_L + i * (W_BAR + GAP);
+    const adjY = y(s.adjusted), adjH = (PAD_T + plotH) - adjY;
+    const rawY = y(s.raw);
+    const rawH = (PAD_T + plotH) - rawY;
+    // threat portion (within adjusted, proportional)
+    const threatRatio = s.adjusted > 0 ? Math.min(1, s.threat / s.raw) : 0;
+    const threatH = adjH * threatRatio;
+    const ghost = s.raw > s.adjusted
+      ? `<rect class="bar-ghost" x="${x}" y="${rawY}" width="${W_BAR}" height="${rawH}" rx="4"/>`
+      : '';
+    const removedLabel = s.removed > 0
+      ? `<text class="bar-removed-label" x="${x + W_BAR/2}" y="${rawY-4}" text-anchor="middle">+${s.removed}</text>`
+      : '';
+    return `
+      <g class="bar-group" data-i="${i}">
+        ${ghost}
+        <rect class="bar-seg" x="${x}" y="${adjY}" width="${W_BAR}" height="${adjH}" rx="4" fill="var(--accent)" data-i="${i}"/>
+        <rect class="bar-seg" x="${x}" y="${adjY + adjH - threatH}" width="${W_BAR}" height="${threatH}" rx="0" fill="var(--red)" opacity="0.85" data-i="${i}" style="pointer-events:none"/>
+        <text class="bar-value-label" x="${x + W_BAR/2}" y="${adjY-6}" text-anchor="middle">${s.adjusted}</text>
+        ${removedLabel}
+        <text class="bar-month-label" x="${x + W_BAR/2}" y="${H-PAD_B+18}" text-anchor="middle">${fmtMonth(s.month)}</text>
+      </g>`;
+  }).join('');
+
+  return `
+  <div class="chart-panel">
+    <div class="chart-head">
+      <span class="chart-title">Detections per month &mdash; adjusted load</span>
+      <div class="chart-legend">
+        <span class="legend-item"><span class="legend-swatch" style="background:var(--accent)"></span>Adjusted load</span>
+        <span class="legend-item"><span class="legend-swatch" style="background:var(--red);opacity:0.85"></span>of which threat-level</span>
+        <span class="legend-item"><span class="legend-swatch" style="border:1px dashed var(--muted);background:transparent"></span>Raw count (pre-dedup)</span>
+      </div>
+    </div>
+    <div class="chart-scroll">
+      <svg class="chart-svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
+        ${grid}
+        ${bars}
+      </svg>
+    </div>
+  </div>`;
+}
+
+function niceCeil(v) {
+  if (v <= 10) return Math.ceil(v);
+  const mag = Math.pow(10, Math.floor(Math.log10(v)));
+  return Math.ceil(v / (mag/2)) * (mag/2);
+}
+function fmtMonth(m) {
+  const [y, mo] = m.split('-');
+  const names = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  return names[parseInt(mo,10)-1] + " '" + y.slice(2);
+}
+
+function wireChartTooltips(series) {
+  const tip = document.getElementById('chartTooltip');
+  document.querySelectorAll('.bar-seg').forEach(seg => {
+    seg.addEventListener('mousemove', e => {
+      const s = series[+seg.dataset.i];
+      tip.innerHTML = `
+        <div class="tt-title">${fmtMonth(s.month)}</div>
+        <div class="tt-row"><span>Raw detections</span><span>${s.raw}</span></div>
+        <div class="tt-row"><span>Adjusted load</span><span>${s.adjusted}</span></div>
+        <div class="tt-row"><span>Noise removed</span><span>${s.removed}</span></div>
+        <div class="tt-row"><span>Threat-level</span><span>${s.threat}</span></div>`;
+      tip.classList.add('show');
+      tip.style.left = Math.min(e.clientX + 14, window.innerWidth - 260) + 'px';
+      tip.style.top  = (e.clientY + 14) + 'px';
+    });
+    seg.addEventListener('mouseleave', () => tip.classList.remove('show'));
+  });
+}
+
+// --- breakdown tables: top burst sources + top threats ---
+function renderBreakdownTables(rows) {
+  // top burst sources: by burst signature, count raw and find max-in-one-hour
+  const sig = {};
+  rows.forEach(d => {
+    const k = burstSignature(d);
+    const s = sig[k] || (sig[k] = { label:k, raw:0, hours:{}, threat:0 });
+    s.raw++;
+    if (d._sev === 'threat') s.threat++;
+    const hb = d._hourBucket;
+    s.hours[hb] = (s.hours[hb]||0)+1;
+  });
+  const burstList = Object.values(sig).map(s => {
+    s.peak = Math.max(...Object.values(s.hours));
+    s.label = s.label.split('|')[0];
+    return s;
+  }).sort((a,b) => b.raw - a.raw).slice(0, 8);
+  const maxBurst = Math.max(1, ...burstList.map(s=>s.raw));
+
+  const burstRows = burstList.map(s => {
+    const isBurst = s.peak >= burstCap;
+    return `<tr>
+      <td class="name barcell" title="${esc(s.label)}">
+        ${esc(s.label)}${isBurst?`<span class="tag-burst">PEAK ${s.peak}/h</span>`:''}
+        <div class="mini-bar${isBurst?' burst':''}" style="width:${Math.round(s.raw/maxBurst*100)}%"></div>
+      </td>
+      <td class="num">${s.raw}</td>
+    </tr>`;
+  }).join('');
+
+  // top threats by name
+  const threats = {};
+  rows.filter(d=>d._sev==='threat').forEach(d => {
+    const k = d.threatName || d.ruleName || '(unknown)';
+    threats[k] = (threats[k]||0)+1;
+  });
+  const threatList = Object.entries(threats).sort((a,b)=>b[1]-a[1]).slice(0,8);
+  const maxThreat = Math.max(1, ...threatList.map(t=>t[1]));
+  const threatRows = threatList.length ? threatList.map(([name,c]) => `
+    <tr>
+      <td class="name barcell" title="${esc(name)}">${esc(name)}
+        <div class="mini-bar" style="width:${Math.round(c/maxThreat*100)}%;background:var(--red)"></div>
+      </td>
+      <td class="num">${c}</td>
+    </tr>`).join('') : '<tr><td colspan="2" style="color:var(--muted);font-style:italic">No threat-level detections in current filter.</td></tr>';
+
+  return `
+  <div class="dash-grid-bottom">
+    <div class="table-panel">
+      <h3>Top burst sources</h3>
+      <div class="panel-hint">Highest-volume rule signatures. A <span style="color:var(--flag)">PEAK</span> tag means one hour hit the burst cap &mdash; a likely update wave.</div>
+      <table class="mini-table">
+        <thead><tr><th>Rule signature</th><th class="num">Raw</th></tr></thead>
+        <tbody>${burstRows}</tbody>
+      </table>
+    </div>
+    <div class="table-panel">
+      <h3>Top threats</h3>
+      <div class="panel-hint">Highest-count threat-level detections in the current filter &mdash; the ones that warranted real attention.</div>
+      <table class="mini-table">
+        <thead><tr><th>Threat</th><th class="num">Count</th></tr></thead>
+        <tbody>${threatRows}</tbody>
+      </table>
+    </div>
+  </div>`;
+}
 </script>
 </body>
 </html>
