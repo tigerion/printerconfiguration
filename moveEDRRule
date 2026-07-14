@@ -3,74 +3,98 @@
 
   <rule>
     <description>
-      <name>MoveEDR - ESET queued for boot-time rename/delete</name>
+      <name>BYOVD - kernel driver loaded from user/temp-writable location</name>
       <category>Defense Evasion</category>
-      <explanation>The PendingFileRenameOperations value under Session Manager was set with data referencing ESET files or folders. At the next reboot, smss.exe renames or deletes these before the ESET service and drivers load, disabling protection. Matches the MoveEDR technique (abuse of MoveFileEx boot-time file operations).</explanation>
+      <explanation>A kernel driver was loaded from a directory that is writable by non-privileged users or is a temporary location (user profile, ProgramData, Temp, Downloads, Desktop, PerfLogs, Public). Legitimate drivers load from System32\drivers, the DriverStore, or WinSxS. Loading a driver from a staging directory is the generic hallmark of Bring Your Own Vulnerable Driver (BYOVD), independent of the specific driver.</explanation>
       <os>Windows</os>
-      <mitreattackid>T1562.001</mitreattackid>
-      <mitreattackid>T1112</mitreattackid>
-      <maliciousCauses>An attacker with local admin used MoveEDR (or MoveFileEx/movefile.exe) to schedule ESET binaries or drivers to be moved/deleted on next boot, permanently disabling the agent.</maliciousCauses>
-      <benignCauses>A genuine uninstall or update of ESET may queue file replacements here, but rename of the running product's own drivers/exe outside the ESET updater is not expected.</benignCauses>
-      <recommendedActions>Do NOT reboot the host until reviewed. Inspect the value with reg query "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager" /v PendingFileRenameOperations and clear malicious entries. Review [navigation:process_details] and [navigation:computer_details]. [remediation:kill]</recommendedActions>
-      <guid>dfa35eb6-ac82-4005-9a85-ded20ac4fee5</guid>
+      <mitreattackid>T1068</mitreattackid>
+      <mitreattackid>T1543.003</mitreattackid>
+      <maliciousCauses>An attacker dropped a signed-but-vulnerable driver to a writable path and loaded it to gain kernel execution, typically to disable or blind the EDR (EDRKillShifter, EDRSandblast, Terminator/Spyboy, KDMapper, etc.).</maliciousCauses>
+      <benignCauses>Rare. Some installers briefly stage drivers in Temp, but loading a running kernel driver from a user-writable path outside the normal driver stores is not expected.</benignCauses>
+      <recommendedActions>Review [navigation:process_details] for the loading process and the driver file, check the signer/hash against the Microsoft vulnerable driver blocklist, and inspect [navigation:computer_details] for EDR telemetry gaps around this time. [remediation:kill]</recommendedActions>
+      <guid>8bd849c3-9966-4a7f-acba-a29b5eeaff0c</guid>
     </description>
     <definition>
       <operations>
-        <operation type="RegSetValue">
+        <operation type="LoadDriver">
+          <operator type="OR">
+            <condition component="FileItem" property="Path" condition="contains" value="\Users\" />
+            <condition component="FileItem" property="Path" condition="contains" value="\Temp\" />
+            <condition component="FileItem" property="Path" condition="contains" value="\AppData\" />
+            <condition component="FileItem" property="Path" condition="contains" value="\Downloads\" />
+            <condition component="FileItem" property="Path" condition="contains" value="\Desktop\" />
+            <condition component="FileItem" property="Path" condition="contains" value="\ProgramData\" />
+            <condition component="FileItem" property="Path" condition="contains" value="\PerfLogs\" />
+            <condition component="FileItem" property="Path" condition="contains" value="\Public\" />
+          </operator>
+        </operation>
+      </operations>
+    </definition>
+    <maliciousTarget name="module" />
+  </rule>
+
+  <rule>
+    <description>
+      <name>BYOVD - kernel-mode service installed from user/temp-writable location</name>
+      <category>Defense Evasion</category>
+      <explanation>A kernel-mode service (Type = DriverType) was registered with the SCM whose image binary resides in a user- or temp-writable directory. BYOVD tooling drops a vulnerable driver and creates a kernel service on the fly to load it. Catches the registration even if the subsequent load is deferred or blocked.</explanation>
+      <os>Windows</os>
+      <mitreattackid>T1068</mitreattackid>
+      <mitreattackid>T1543.003</mitreattackid>
+      <maliciousCauses>Creation of a kernel service pointing at an attacker-dropped vulnerable driver, used to obtain kernel execution and tamper with security products.</maliciousCauses>
+      <benignCauses>Some third-party software installs kernel services, but legitimate ones place the driver under System32\drivers or the DriverStore, not in Temp or a user profile.</benignCauses>
+      <recommendedActions>Correlate with Security event 7045, verify the driver signer/hash, and check for EDR telemetry loss on [navigation:computer_details]. [remediation:kill]</recommendedActions>
+      <guid>9a2572b5-4a65-40b3-b6ed-a1f81dade117</guid>
+    </description>
+    <definition>
+      <operations>
+        <operation type="ServiceInstalled">
           <operator type="AND">
-            <condition component="RegistryItem" property="Key" condition="contains" value="\Session Manager\" />
-            <condition component="RegistryItem" property="Key" condition="ends" value="\PendingFileRenameOperations" />
+            <condition component="Service" property="Type" condition="is" value="1" />
             <operator type="OR">
-              <condition component="RegistryItem" property="StringValue" condition="contains" value="\ESET\" />
-              <condition component="RegistryItem" property="StringValue" condition="contains" value="ekrn" />
-              <condition component="RegistryItem" property="StringValue" condition="contains" value="eamonm" />
-              <condition component="RegistryItem" property="StringValue" condition="contains" value="edevmon" />
-              <condition component="RegistryItem" property="StringValue" condition="contains" value="ehdrv" />
-              <condition component="RegistryItem" property="StringValue" condition="contains" value="epfw" />
+              <condition component="FileItem" property="Path" condition="contains" value="\Users\" />
+              <condition component="FileItem" property="Path" condition="contains" value="\Temp\" />
+              <condition component="FileItem" property="Path" condition="contains" value="\AppData\" />
+              <condition component="FileItem" property="Path" condition="contains" value="\Downloads\" />
+              <condition component="FileItem" property="Path" condition="contains" value="\Desktop\" />
+              <condition component="FileItem" property="Path" condition="contains" value="\ProgramData\" />
+              <condition component="FileItem" property="Path" condition="contains" value="\PerfLogs\" />
+              <condition component="FileItem" property="Path" condition="contains" value="\Public\" />
             </operator>
           </operator>
         </operation>
       </operations>
     </definition>
-    <maliciousTarget name="current" />
+    <maliciousTarget name="module" />
   </rule>
 
   <rule>
     <description>
-      <name>MoveEDR - PendingFileRenameOperations set by shell/script host</name>
+      <name>BYOVD - kernel driver loaded outside standard driver directories (broad)</name>
       <category>Defense Evasion</category>
-      <explanation>A command shell, PowerShell, or scripting/LOLBin process wrote the Session Manager PendingFileRenameOperations value, which schedules file rename/delete at next boot. This value is normally written by installers and Windows Update, not interactive shells. Consistent with MoveEDR using custom target paths.</explanation>
+      <explanation>A kernel driver was loaded from a path outside System32 and outside the WinSxS/DriverStore locations. This is a broad net for BYOVD and unusual driver placement. Higher potential for false positives from legitimate third-party drivers that load from vendor folders under Program Files, so baseline your environment and exclude known-good vendor paths before raising severity.</explanation>
       <os>Windows</os>
-      <mitreattackid>T1562.001</mitreattackid>
-      <mitreattackid>T1112</mitreattackid>
-      <maliciousCauses>MoveEDR (or a manual equivalent) invoked via PowerShell/cmd/reg to queue files for boot-time move or deletion, e.g. to disable ESET whose paths were supplied with -CustomPaths.</maliciousCauses>
-      <benignCauses>An admin script performing a legitimate scheduled file replacement, or a pending-reboot helper. Baseline known admin scripts and add exclusions as needed.</benignCauses>
-      <recommendedActions>Review the written value data and the [navigation:process_details] command line before rebooting. Correlate with the parent process and user context on [navigation:computer_details].</recommendedActions>
-      <guid>808a59e8-15dd-43bb-995d-9e3f94bc3674</guid>
+      <mitreattackid>T1068</mitreattackid>
+      <mitreattackid>T1543.003</mitreattackid>
+      <maliciousCauses>A vulnerable or malicious driver loaded from a non-standard location as part of a BYOVD or rootkit-style attack.</maliciousCauses>
+      <benignCauses>Legitimate third-party drivers occasionally load from vendor directories under Program Files. Establish a baseline and add exclusions before treating this as high severity.</benignCauses>
+      <recommendedActions>Compare the driver against known-good vendor drivers, verify signer and hash, and review the loading process lineage in [navigation:process_details].</recommendedActions>
+      <guid>756ad6a0-d5b3-43e0-a617-8f990bf9f054</guid>
     </description>
     <definition>
-      <process>
-        <operator type="OR">
-          <condition component="FileItem" property="FileNameWithoutExtension" condition="is" value="powershell" />
-          <condition component="FileItem" property="FileNameWithoutExtension" condition="is" value="pwsh" />
-          <condition component="FileItem" property="FileNameWithoutExtension" condition="is" value="cmd" />
-          <condition component="FileItem" property="FileNameWithoutExtension" condition="is" value="reg" />
-          <condition component="FileItem" property="FileNameWithoutExtension" condition="is" value="wscript" />
-          <condition component="FileItem" property="FileNameWithoutExtension" condition="is" value="cscript" />
-          <condition component="FileItem" property="FileNameWithoutExtension" condition="is" value="mshta" />
-          <condition component="FileItem" property="FileNameWithoutExtension" condition="is" value="rundll32" />
-        </operator>
-      </process>
       <operations>
-        <operation type="RegSetValue">
+        <operation type="LoadDriver">
           <operator type="AND">
-            <condition component="RegistryItem" property="Key" condition="contains" value="\Session Manager\" />
-            <condition component="RegistryItem" property="Key" condition="ends" value="\PendingFileRenameOperations" />
+            <condition component="FileItem" property="Path" condition="notstarts" value="%SYSTEM%" />
+            <condition component="FileItem" property="Path" condition="notcontains" value="\WinSxS\" />
+            <condition component="FileItem" property="Path" condition="notcontains" value="\DriverStore\" />
+            <condition component="FileItem" property="Path" condition="notcontains" value="\System32\" />
+            <condition component="FileItem" property="Path" condition="notcontains" value="\SysWOW64\" />
           </operator>
         </operation>
       </operations>
     </definition>
-    <maliciousTarget name="current" />
+    <maliciousTarget name="module" />
   </rule>
 
 </rules>
