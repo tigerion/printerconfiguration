@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rules>
+
+  <rule>
+    <description>
+      <name>MoveEDR - ESET queued for boot-time rename/delete</name>
+      <category>Defense Evasion</category>
+      <explanation>The PendingFileRenameOperations value under Session Manager was set with data referencing ESET files or folders. At the next reboot, smss.exe renames or deletes these before the ESET service and drivers load, disabling protection. Matches the MoveEDR technique (abuse of MoveFileEx boot-time file operations).</explanation>
+      <os>Windows</os>
+      <mitreattackid>T1562.001</mitreattackid>
+      <mitreattackid>T1112</mitreattackid>
+      <maliciousCauses>An attacker with local admin used MoveEDR (or MoveFileEx/movefile.exe) to schedule ESET binaries or drivers to be moved/deleted on next boot, permanently disabling the agent.</maliciousCauses>
+      <benignCauses>A genuine uninstall or update of ESET may queue file replacements here, but rename of the running product's own drivers/exe outside the ESET updater is not expected.</benignCauses>
+      <recommendedActions>Do NOT reboot the host until reviewed. Inspect the value with reg query "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager" /v PendingFileRenameOperations and clear malicious entries. Review [navigation:process_details] and [navigation:computer_details]. [remediation:kill]</recommendedActions>
+      <guid>dfa35eb6-ac82-4005-9a85-ded20ac4fee5</guid>
+    </description>
+    <definition>
+      <operations>
+        <operation type="RegSetValue">
+          <operator type="AND">
+            <condition component="RegistryItem" property="Key" condition="contains" value="\Session Manager\" />
+            <condition component="RegistryItem" property="Key" condition="ends" value="\PendingFileRenameOperations" />
+            <operator type="OR">
+              <condition component="RegistryItem" property="StringValue" condition="contains" value="\ESET\" />
+              <condition component="RegistryItem" property="StringValue" condition="contains" value="ekrn" />
+              <condition component="RegistryItem" property="StringValue" condition="contains" value="eamonm" />
+              <condition component="RegistryItem" property="StringValue" condition="contains" value="edevmon" />
+              <condition component="RegistryItem" property="StringValue" condition="contains" value="ehdrv" />
+              <condition component="RegistryItem" property="StringValue" condition="contains" value="epfw" />
+            </operator>
+          </operator>
+        </operation>
+      </operations>
+    </definition>
+    <maliciousTarget name="current" />
+  </rule>
+
+  <rule>
+    <description>
+      <name>MoveEDR - PendingFileRenameOperations set by shell/script host</name>
+      <category>Defense Evasion</category>
+      <explanation>A command shell, PowerShell, or scripting/LOLBin process wrote the Session Manager PendingFileRenameOperations value, which schedules file rename/delete at next boot. This value is normally written by installers and Windows Update, not interactive shells. Consistent with MoveEDR using custom target paths.</explanation>
+      <os>Windows</os>
+      <mitreattackid>T1562.001</mitreattackid>
+      <mitreattackid>T1112</mitreattackid>
+      <maliciousCauses>MoveEDR (or a manual equivalent) invoked via PowerShell/cmd/reg to queue files for boot-time move or deletion, e.g. to disable ESET whose paths were supplied with -CustomPaths.</maliciousCauses>
+      <benignCauses>An admin script performing a legitimate scheduled file replacement, or a pending-reboot helper. Baseline known admin scripts and add exclusions as needed.</benignCauses>
+      <recommendedActions>Review the written value data and the [navigation:process_details] command line before rebooting. Correlate with the parent process and user context on [navigation:computer_details].</recommendedActions>
+      <guid>808a59e8-15dd-43bb-995d-9e3f94bc3674</guid>
+    </description>
+    <definition>
+      <process>
+        <operator type="OR">
+          <condition component="FileItem" property="FileNameWithoutExtension" condition="is" value="powershell" />
+          <condition component="FileItem" property="FileNameWithoutExtension" condition="is" value="pwsh" />
+          <condition component="FileItem" property="FileNameWithoutExtension" condition="is" value="cmd" />
+          <condition component="FileItem" property="FileNameWithoutExtension" condition="is" value="reg" />
+          <condition component="FileItem" property="FileNameWithoutExtension" condition="is" value="wscript" />
+          <condition component="FileItem" property="FileNameWithoutExtension" condition="is" value="cscript" />
+          <condition component="FileItem" property="FileNameWithoutExtension" condition="is" value="mshta" />
+          <condition component="FileItem" property="FileNameWithoutExtension" condition="is" value="rundll32" />
+        </operator>
+      </process>
+      <operations>
+        <operation type="RegSetValue">
+          <operator type="AND">
+            <condition component="RegistryItem" property="Key" condition="contains" value="\Session Manager\" />
+            <condition component="RegistryItem" property="Key" condition="ends" value="\PendingFileRenameOperations" />
+          </operator>
+        </operation>
+      </operations>
+    </definition>
+    <maliciousTarget name="current" />
+  </rule>
+
+</rules>
