@@ -1,0 +1,27 @@
+$gpoDisplayName = "Name of the GPO"   # exactly as shown in BloodHound/GPMC
+
+# All SIDs that apply to you right now (you + every group in your token, incl. nested)
+$me = [Security.Principal.WindowsIdentity]::GetCurrent()
+$mySids = @($me.User.Value) + ($me.Groups | ForEach-Object { $_.Value })
+
+# Find the GPO object
+$r = ([adsisearcher]"(&(objectClass=groupPolicyContainer)(displayName=$gpoDisplayName))").FindOne()
+if (-not $r) { Write-Warning "GPO not found"; return }
+$gpo = $r.GetDirectoryEntry()
+"GPO DN: $($gpo.distinguishedName)"
+
+# Write-ish rights to flag
+$write = 'GenericAll','GenericWrite','WriteProperty','WriteDacl','WriteOwner','Self'
+
+$gpo.ObjectSecurity.Access | Where-Object {
+    $_.AccessControlType -eq 'Allow' -and
+    ($_.ActiveDirectoryRights.ToString() -split ',\s*' | Where-Object { $write -contains $_ })
+} | ForEach-Object {
+    $sid = try { $_.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value }
+           catch { $_.IdentityReference.Value }
+    [pscustomobject]@{
+        Trustee     = $_.IdentityReference.Value
+        Rights      = $_.ActiveDirectoryRights
+        AppliesToMe = $mySids -contains $sid
+    }
+} | Format-Table -Auto
