@@ -24,3 +24,12 @@ After
 ```
 . $PROFILE
 ```
+
+```
+$dn = "CN={GPO-GUID},CN=Policies,CN=System,DC=domain,DC=com"
+$obj = [ADSI]"LDAP://$dn"
+$obj.ObjectSecurity.Access |
+  Where-Object { $_.ActiveDirectoryRights -match 'GenericWrite|GenericAll|WriteProperty|WriteDacl|WriteOwner' } |
+  Select-Object IdentityReference, ActiveDirectoryRights, AccessControlType |
+  Format-Table -Auto
+```
