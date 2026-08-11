@@ -13,3 +13,19 @@
 | where verdict!="OK"
 | eval last_scan=strftime(last_scan,"%Y-%m-%d %H:%M")
 | sort verdict dnsName
+
+
+
+
+(pluginID=21745 OR pluginID=110385 OR pluginID=110095 OR pluginID=104410
+     OR pluginID=26917 OR pluginID=24786 OR pluginID=102094)
+| eval reason=case(
+    pluginID=21745,"Auth failed - local checks not run",
+    pluginID=110385,"Credential failure (per protocol)",
+    pluginID=110095,"No credentials provided",
+    pluginID=104410,"Auth OK but insufficient access",
+    pluginID=26917,"Windows: cannot access registry",
+    pluginID=24786,"Windows: no admin privileges",
+    pluginID=102094,"SSH: privilege escalation required",
+    true(),pluginName)
+| table dnsName ip pluginID reason protocol pluginText
