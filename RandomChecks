@@ -1,16 +1,37 @@
-(pluginID=110723 OR pluginID=12634 OR pluginID=10394 OR pluginID=24269
-     OR pluginID=21745 OR pluginID=110385 OR pluginID=110095 OR pluginID=104410
-     OR pluginID=26917 OR pluginID=24786 OR pluginID=102094)
+    (pluginID=117887 OR pluginID=21745 OR pluginID=117886
+     OR pluginID=141118 OR pluginID=110095 OR pluginID=110385 OR pluginID=117885
+     OR pluginID=104410 OR pluginID=110723)
 | rex max_match=0 field=pluginText "(?i)(?:protocol\s*[:\-]?\s*)?(?<auth_proto>SSH|SMB|WMI|Windows)"
-| where pluginID IN (21745,26917,24786,102094,10394,24269,12634) OR mvcount(auth_proto)>0
-| eval bucket=if(pluginID IN (110723,12634,10394,24269),"success","failure")
-| stats count(eval(bucket=="success")) as success_signals
-        count(eval(bucket=="failure")) as failure_signals
-        values(pluginName) as signals
-        latest(lastSeen) as last_scan by dnsName ip
-| eval verdict=case(failure_signals>0 AND success_signals=0,"FAILING",
-                    failure_signals>0 AND success_signals>0,"PARTIAL",
-                    success_signals>0,"OK", true(),"UNKNOWN")
+| where pluginID IN (117887,21745,117886) OR mvcount(auth_proto)>0
+| eval sig=case(
+    pluginID==117887,"local_ok",
+    pluginID==21745,"local_fail",
+    pluginID==117886,"local_na",
+    pluginID IN (141118,110095),"auth_ok",
+    pluginID IN (110385,117885),"auth_priv",
+    pluginID==104410,"auth_fail",
+    pluginID==110723,"no_creds")
+| eval dnsName=if(dnsName=="",null(),dnsName),
+       netbiosName=if(netbiosName=="",null(),netbiosName)
+| stats max(eval(if(sig=="local_ok",1,0)))   as local_ok
+        max(eval(if(sig=="local_fail",1,0))) as local_fail
+        max(eval(if(sig=="auth_ok",1,0)))    as auth_ok
+        max(eval(if(sig=="auth_priv",1,0)))  as auth_priv
+        max(eval(if(sig=="auth_fail",1,0)))  as auth_fail
+        max(eval(if(sig=="no_creds",1,0)))   as no_creds
+        max(eval(if(sig=="local_na",1,0)))   as local_na
+        values(dnsName) as dnsName values(netbiosName) as netbiosName
+        values(pluginName) as signals latest(lastSeen) as last_scan by ip
+| eval host=coalesce(mvindex(dnsName,0), mvindex(netbiosName,0), ip)
+| eval verdict=case(
+    local_ok==1 AND (auth_priv==1 OR auth_fail==1), "OK-BUT-PARTIAL",
+    local_ok==1,                                    "OK",
+    auth_fail==1,                                   "AUTH-FAILED",
+    local_fail==1,                                  "LOCAL-CHECKS-FAILED",
+    no_creds==1,                                    "NO-CREDS-PROVIDED",
+    local_na==1,                                    "NOT-SUPPORTED",
+    true(),                                         "UNKNOWN")
 | where verdict!="OK"
 | eval last_scan=strftime(last_scan,"%Y-%m-%d %H:%M")
-| sort verdict dnsName
+| table host ip verdict signals last_scan
+| sort verdict host
