@@ -1,6 +1,15 @@
-| rex field=pluginText "Credentialed checks\s*:\s*(?<cred>\w+)"
-| eval cred_status=if(match(cred,"(?i)yes"),"credentialed","NOT credentialed")
-| stats latest(cred_status) as cred_status latest(lastSeen) as last_scan by dnsName ip repository
-| where cred_status="NOT credentialed"
+(pluginID=110723 OR pluginID=12634 OR pluginID=10394 OR pluginID=24269
+     OR pluginID=21745 OR pluginID=110385 OR pluginID=110095 OR pluginID=104410
+     OR pluginID=26917 OR pluginID=24786 OR pluginID=102094)
+| eval bucket=if(pluginID IN (110723,12634,10394,24269),"success","failure")
+| stats count(eval(bucket=="success")) as success_signals
+        count(eval(bucket=="failure")) as failure_signals
+        values(pluginName) as signals
+        latest(lastSeen) as last_scan by dnsName ip
+| eval verdict=case(failure_signals>0 AND success_signals=0,"FAILING",
+                    failure_signals>0 AND success_signals>0,"PARTIAL",
+                    success_signals>0,"OK",
+                    true(),"UNKNOWN")
+| where verdict!="OK"
 | eval last_scan=strftime(last_scan,"%Y-%m-%d %H:%M")
-| sort dnsName
+| sort verdict dnsName
