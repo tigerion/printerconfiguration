@@ -1,6 +1,9 @@
-(pluginID=110723 OR pluginID=12634 OR pluginID=10394 OR pluginID=24269
+ (pluginID=110723 OR pluginID=12634 OR pluginID=10394 OR pluginID=24269
      OR pluginID=21745 OR pluginID=110385 OR pluginID=110095 OR pluginID=104410
      OR pluginID=26917 OR pluginID=24786 OR pluginID=102094)
+| rex max_match=0 field=pluginText "(?i)(?:protocol\s*[:\-]?\s*)?(?<auth_proto>SSH|SMB|WMI|Windows|Database|Oracle|MSSQL|MySQL|PostgreSQL|DB2)"
+| eval non_db_proto=mvfilter(NOT match(auth_proto,"(?i)database|oracle|mssql|mysql|postgres|db2"))
+| where pluginID IN (21745,26917,24786,102094,10394,24269,12634) OR mvcount(non_db_proto)>0
 | eval bucket=if(pluginID IN (110723,12634,10394,24269),"success","failure")
 | stats count(eval(bucket=="success")) as success_signals
         count(eval(bucket=="failure")) as failure_signals
@@ -8,24 +11,7 @@
         latest(lastSeen) as last_scan by dnsName ip
 | eval verdict=case(failure_signals>0 AND success_signals=0,"FAILING",
                     failure_signals>0 AND success_signals>0,"PARTIAL",
-                    success_signals>0,"OK",
-                    true(),"UNKNOWN")
+                    success_signals>0,"OK", true(),"UNKNOWN")
 | where verdict!="OK"
 | eval last_scan=strftime(last_scan,"%Y-%m-%d %H:%M")
 | sort verdict dnsName
-
-
-
-
-(pluginID=21745 OR pluginID=110385 OR pluginID=110095 OR pluginID=104410
-     OR pluginID=26917 OR pluginID=24786 OR pluginID=102094)
-| eval reason=case(
-    pluginID=21745,"Auth failed - local checks not run",
-    pluginID=110385,"Credential failure (per protocol)",
-    pluginID=110095,"No credentials provided",
-    pluginID=104410,"Auth OK but insufficient access",
-    pluginID=26917,"Windows: cannot access registry",
-    pluginID=24786,"Windows: no admin privileges",
-    pluginID=102094,"SSH: privilege escalation required",
-    true(),pluginName)
-| table dnsName ip pluginID reason protocol pluginText
