@@ -1,0 +1,54 @@
+:: which SID belongs to whom
+reg query "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList" /s /v ProfileImagePath
+
+:: which hives are currently loaded (user must be logged on)
+reg query HKU
+
+
+reg load HKU\TRIAGE "C:\Users\<user>\NTUSER.DAT"
+:: ... run the queries against HKU\TRIAGE ...
+reg unload HKU\TRIAGE
+
+
+:: what Office versions exist
+reg query "HKCU\Software\Microsoft\Office"
+
+:: [1] THE answer to "what did he open" - full paths + [T<FILETIME>] stamps
+reg query "HKCU\Software\Microsoft\Office\16.0\Excel\File MRU" /s
+reg query "HKCU\Software\Microsoft\Office\16.0\Excel\Place MRU" /s
+reg query "HKCU\Software\Microsoft\Office\16.0\Excel\User MRU" /s
+
+:: [2] docs the user explicitly clicked Enable Editing / Enable Content on
+::     trailing  FF FF FF 7F = MACROS ENABLED   |   00 00 00 00 = editing only
+reg query "HKCU\Software\Microsoft\Office\16.0\Excel\Security\Trusted Documents\TrustRecords" /s
+
+:: [3] macro posture at the time
+reg query "HKCU\Software\Microsoft\Office\16.0\Excel\Security" /v VBAWarnings
+reg query "HKCU\Software\Microsoft\Office\16.0\Excel\Security" /v AccessVBOM
+reg query "HKCU\Software\Microsoft\Office\16.0\Excel\Security\Trusted Locations" /s
+reg query "HKCU\Software\Microsoft\Office\16.0\Excel\Security\ProtectedView" /s
+
+:: [4] docs Excel crashed on / disabled - often the interesting ones
+reg query "HKCU\Software\Microsoft\Office\16.0\Excel\Resiliency" /s
+
+:: [5] shell-level recent docs (binary; UTF-16 filename sits at offset 0)
+reg query "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\RecentDocs\.xlsx" /s
+reg query "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\RecentDocs\.xls"  /s
+reg query "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\RecentDocs\.xlsm" /s
+
+:: [6] what he browsed to in Excel's own Open/Save dialogs
+reg query "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\ComDlg32\OpenSavePidlMRU\xlsx" /s
+reg query "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\ComDlg32\LastVisitedPidlMRU" /s
+
+:: [7] where the file lived - shares, mapped drives, OneDrive roots
+reg query "HKCU\Network" /s
+reg query "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Map Network Drive MRU" /s
+reg query "HKCU\Software\Microsoft\OneDrive\Accounts" /s /v UserFolder
+
+:: [8] is the Recycle Bin even enabled on that volume? (proves the $R path is normal)
+reg query "HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\BitBucket\Volume" /s
+
+:: [9] Excel add-in persistence, while you're here
+reg query "HKCU\Software\Microsoft\Office\Excel\Addins" /s
+reg query "HKLM\SOFTWARE\Microsoft\Office\Excel\Addins" /s
+reg query "HKLM\SOFTWARE\WOW6432Node\Microsoft\Office\Excel\Addins" /s
