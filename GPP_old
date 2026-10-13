@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ESET Exclusion Reviewer</title>
+<title>ESET Detection Reviewer</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Syne:wght@400;600;700;800&display=swap');
 
@@ -125,11 +125,7 @@
     white-space: nowrap;
   }
 
-  .topbar-stats {
-    display: flex;
-    gap: 10px;
-    flex-wrap: wrap;
-  }
+  .topbar-stats { display: flex; gap: 10px; flex-wrap: wrap; }
 
   .stat-chip {
     padding: 4px 10px;
@@ -139,13 +135,13 @@
     font-family: 'JetBrains Mono', monospace;
     border: 1px solid transparent;
   }
-  .stat-chip.total   { background: rgba(79,142,247,0.12); border-color: rgba(79,142,247,0.3);  color: var(--accent); }
-  .stat-chip.enabled { background: rgba(34,197,94,0.12);  border-color: rgba(34,197,94,0.3);   color: var(--green); }
-  .stat-chip.disabled{ background: rgba(239,68,68,0.12);  border-color: rgba(239,68,68,0.3);   color: var(--red); }
-  .stat-chip.flagged { background: rgba(245,158,11,0.12); border-color: rgba(245,158,11,0.3);  color: var(--yellow); }
+  .stat-chip.total    { background: rgba(79,142,247,0.12); border-color: rgba(79,142,247,0.3);  color: var(--accent); }
+  .stat-chip.threat   { background: rgba(239,68,68,0.12);  border-color: rgba(239,68,68,0.3);   color: var(--red); }
+  .stat-chip.unres    { background: rgba(245,158,11,0.12); border-color: rgba(245,158,11,0.3);  color: var(--yellow); }
+  .stat-chip.noted    { background: rgba(34,197,94,0.12);  border-color: rgba(34,197,94,0.3);   color: var(--green); }
+  .stat-chip.flagged  { background: rgba(245,158,11,0.12); border-color: rgba(245,158,11,0.3);  color: var(--flag); }
 
   .topbar-spacer { flex: 1; }
-
   .topbar-actions { display: flex; gap: 8px; }
 
   /* ---- FILTER BAR ---- */
@@ -202,36 +198,17 @@
     white-space: nowrap;
   }
   .filter-btn:hover          { border-color: var(--accent); color: var(--text); }
-  .filter-btn.active         { background: var(--accent); border-color: var(--accent); color: #fff; }
-  .filter-btn.active-red     { background: var(--red);    border-color: var(--red);    color: #fff; }
-  .filter-btn.active-yellow  { background: var(--flag);   border-color: var(--flag);   color: #000; }
-  .filter-btn.active-green   { background: var(--green);  border-color: var(--green);  color: #000; }
-  .filter-btn.active-purple  { background: var(--accent2);border-color: var(--accent2);color: #fff; }
+  .filter-btn.active         { background: var(--accent);  border-color: var(--accent);  color: #fff; }
+  .filter-btn.active-red     { background: var(--red);     border-color: var(--red);     color: #fff; }
+  .filter-btn.active-yellow  { background: var(--flag);    border-color: var(--flag);    color: #000; }
+  .filter-btn.active-green   { background: var(--green);   border-color: var(--green);   color: #000; }
 
   .filter-label { font-size: 12px; color: var(--muted); font-weight: 600; letter-spacing: 0.05em; }
-
-  /* ---- STATS PANEL ---- */
-  .stats-panel { background: var(--surface); border-bottom: 1px solid var(--border); padding: 14px 24px; display: none; }
-  .stats-panel.open { display: block; }
-  .stats-header { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
-  .stats-title { font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.1em; flex: 1; }
-  .stats-toggle { padding: 3px 10px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface2); color: var(--muted); font-family: 'Syne', sans-serif; font-size: 11px; font-weight: 600; cursor: pointer; transition: all 0.15s; }
-  .stats-toggle:hover { border-color: var(--accent); color: var(--text); }
-  .stats-toggle.on { background: var(--accent); border-color: var(--accent); color: #fff; }
-  .stats-grid { display: flex; flex-wrap: wrap; gap: 8px; }
-  .stats-row { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 8px 14px; display: flex; align-items: center; gap: 10px; cursor: pointer; transition: all 0.15s; user-select: none; min-width: 200px; }
-  .stats-row:hover { border-color: var(--accent); }
-  .stats-row.excluded { opacity: 0.35; }
-  .stats-row.excluded .stats-name { text-decoration: line-through; }
-  .stats-name  { font-size: 13px; font-weight: 600; color: var(--text); flex: 1; }
-  .stats-count { font-size: 12px; font-family: 'JetBrains Mono', monospace; color: var(--accent); white-space: nowrap; }
-  .stats-bar-wrap { flex: 1; min-width: 60px; height: 5px; background: var(--border); border-radius: 3px; overflow: hidden; }
-  .stats-bar { height: 100%; background: var(--accent); border-radius: 3px; transition: width 0.3s; }
 
   /* ---- MAIN LAYOUT ---- */
   .main {
     display: grid;
-    grid-template-columns: 280px 1fr;
+    grid-template-columns: 300px 1fr;
     flex: 1;
     min-height: 0;
     overflow: hidden;
@@ -281,10 +258,15 @@
     text-overflow: ellipsis;
   }
 
-  .item-meta {
-    display: flex;
-    gap: 6px;
-    align-items: center;
+  .item-meta { display: flex; gap: 6px; align-items: center; }
+
+  .item-sub {
+    font-size: 11px;
+    color: var(--muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-style: italic;
   }
 
   .badge {
@@ -295,11 +277,13 @@
     font-family: 'JetBrains Mono', monospace;
     letter-spacing: 0.05em;
   }
-  .badge-enabled  { background: rgba(34,197,94,0.15);  color: var(--green); }
-  .badge-disabled { background: rgba(239,68,68,0.15);  color: var(--red); }
-  .badge-rules    { background: rgba(79,142,247,0.15); color: var(--accent); }
+  .badge-threat   { background: rgba(239,68,68,0.15);  color: var(--red); }
+  .badge-warning  { background: rgba(245,158,11,0.15); color: var(--yellow); }
+  .badge-info     { background: rgba(79,142,247,0.15); color: var(--accent); }
+  .badge-resolved { background: rgba(34,197,94,0.15);  color: var(--green); }
+  .badge-unres    { background: rgba(239,68,68,0.10);  color: var(--red); }
+  .badge-note     { background: rgba(34,197,94,0.15);  color: var(--green); }
   .badge-flag     { background: rgba(245,158,11,0.2);  color: var(--flag); }
-  .badge-noxml    { background: rgba(100,116,139,0.2); color: var(--muted); }
 
   /* ---- DETAIL PANEL ---- */
   .detail {
@@ -328,7 +312,7 @@
     align-items: flex-start;
     justify-content: space-between;
     gap: 16px;
-    margin-bottom: 24px;
+    margin-bottom: 20px;
     flex-wrap: wrap;
   }
 
@@ -368,6 +352,8 @@
     color: var(--muted);
     font-family: 'JetBrains Mono', monospace;
     padding: 0 8px;
+    flex: 1;
+    text-align: center;
   }
 
   .flag-btn {
@@ -385,13 +371,89 @@
     align-items: center;
     gap: 6px;
   }
-  .flag-btn:hover       { border-color: var(--flag); color: var(--flag); }
-  .flag-btn.flagged     { background: rgba(245,158,11,0.15); border-color: var(--flag); color: var(--flag); }
+  .flag-btn:hover   { border-color: var(--flag); color: var(--flag); }
+  .flag-btn.flagged { background: rgba(245,158,11,0.15); border-color: var(--flag); color: var(--flag); }
+
+  /* ---- SECTION LABEL ---- */
+  .section-label {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    margin-bottom: 10px;
+  }
+
+  /* ---- NOTE BLOCK ---- */
+  .note-block {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+    border-radius: 0 10px 10px 0;
+    padding: 14px 16px;
+    font-size: 14px;
+    line-height: 1.65;
+    margin-bottom: 24px;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .note-block.empty { color: var(--muted); font-style: italic; border-left-color: var(--border); }
+
+  /* ---- COMMENTS ---- */
+  .comment-thread {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 24px;
+  }
+
+  .comment-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 14px;
+    display: grid;
+    grid-template-columns: 32px 1fr;
+    gap: 6px 10px;
+    align-items: start;
+  }
+
+  .comment-avatar {
+    width: 32px; height: 32px;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    font-weight: 600;
+    color: #fff;
+    flex-shrink: 0;
+  }
+
+  .comment-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 4px;
+  }
+
+  .comment-author { font-size: 13px; font-weight: 700; color: var(--text); }
+  .comment-time   { font-size: 11px; color: var(--muted); font-family: 'JetBrains Mono', monospace; }
+  .comment-edited { font-size: 10px; color: var(--muted); font-style: italic; }
+
+  .comment-body {
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--text);
+    white-space: pre-wrap;
+    word-break: break-word;
+    grid-column: 2;
+  }
 
   /* ---- FIELDS GRID ---- */
   .fields-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
     gap: 12px;
     margin-bottom: 24px;
   }
@@ -415,58 +477,20 @@
   }
 
   .field-value {
-    font-size: 14px;
+    font-size: 13px;
     font-weight: 600;
     color: var(--text);
     word-break: break-all;
     font-family: 'JetBrains Mono', monospace;
   }
-  .field-value.empty { color: var(--muted); font-style: italic; font-family: 'Syne', sans-serif; font-weight: 400; }
+  .field-value.empty  { color: var(--muted); font-style: italic; font-family: 'Syne', sans-serif; font-weight: 400; font-size: 13px; }
+  .field-value.red    { color: var(--red); }
+  .field-value.yellow { color: var(--yellow); }
+  .field-value.green  { color: var(--green); }
+  .field-value.blue   { color: var(--accent); }
 
-  /* ---- NOTE BLOCK ---- */
-  .section-label {
-    font-size: 12px;
-    font-weight: 700;
-    color: var(--muted);
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    margin-bottom: 10px;
-  }
-
-  .note-block {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-left: 3px solid var(--accent);
-    border-radius: 0 10px 10px 0;
-    padding: 14px 16px;
-    font-size: 14px;
-    line-height: 1.6;
-    margin-bottom: 24px;
-    white-space: pre-wrap;
-    word-break: break-word;
-  }
-  .note-block.empty { color: var(--muted); font-style: italic; border-left-color: var(--border); }
-
-  /* ---- RULES BLOCK ---- */
-  .rules-block {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    margin-bottom: 24px;
-  }
-
-  .rule-chip {
-    padding: 5px 12px;
-    border-radius: 6px;
-    background: rgba(79,142,247,0.1);
-    border: 1px solid rgba(79,142,247,0.25);
-    color: var(--accent);
-    font-size: 12px;
-    font-family: 'JetBrains Mono', monospace;
-  }
-
-  /* ---- XML BLOCK ---- */
-  .xml-wrap {
+  /* ---- MONO BLOCK (process / module) ---- */
+  .mono-block {
     background: var(--code-bg);
     border: 1px solid var(--border);
     border-radius: 10px;
@@ -474,16 +498,15 @@
     margin-bottom: 24px;
   }
 
-  .xml-toolbar {
+  .mono-toolbar {
     display: flex;
     align-items: center;
-    justify-content: space-between;
     padding: 10px 16px;
     background: var(--surface);
     border-bottom: 1px solid var(--border);
   }
 
-  .xml-toolbar-label {
+  .mono-toolbar-label {
     font-size: 12px;
     font-weight: 700;
     color: var(--muted);
@@ -491,49 +514,14 @@
     letter-spacing: 0.1em;
   }
 
-  .copy-btn {
-    padding: 4px 10px;
-    border-radius: 6px;
-    border: 1px solid var(--border);
-    background: transparent;
-    color: var(--muted);
-    font-family: 'Syne', sans-serif;
-    font-size: 12px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.15s;
-  }
-  .copy-btn:hover { border-color: var(--accent); color: var(--accent); }
-  .copy-btn.copied { border-color: var(--green); color: var(--green); }
-
-  .xml-code {
-    padding: 20px;
+  .mono-body {
+    padding: 16px 20px;
     font-family: 'JetBrains Mono', monospace;
     font-size: 12.5px;
     line-height: 1.7;
-    overflow-x: auto;
-    white-space: pre;
     color: #94a3b8;
-    max-height: 480px;
-    overflow-y: auto;
-  }
-  .xml-code::-webkit-scrollbar { width: 4px; height: 4px; }
-  .xml-code::-webkit-scrollbar-track { background: transparent; }
-  .xml-code::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
-
-  /* XML syntax highlighting */
-  .xml-tag       { color: #7dd3fc; }
-  .xml-attr      { color: #86efac; }
-  .xml-val       { color: #fca5a5; }
-  .xml-comment   { color: #475569; font-style: italic; }
-  .xml-text      { color: #e2e8f0; }
-
-  .xml-empty {
-    padding: 20px;
-    color: var(--muted);
-    font-style: italic;
-    font-family: 'Syne', sans-serif;
-    font-size: 14px;
+    white-space: pre-wrap;
+    word-break: break-all;
   }
 
   /* ---- BUTTONS ---- */
@@ -553,12 +541,11 @@
     gap: 6px;
     white-space: nowrap;
   }
-  .btn:hover          { border-color: var(--accent); }
-  .btn.btn-accent     { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn:hover        { border-color: var(--accent); }
+  .btn.btn-accent   { background: var(--accent); border-color: var(--accent); color: #fff; }
   .btn.btn-accent:hover { background: #3d7ae5; }
-  .btn.btn-danger     { background: rgba(239,68,68,0.1); border-color: var(--red); color: var(--red); }
 
-  /* ---- EXPORT MODAL ---- */
+  /* ---- MODAL ---- */
   .modal-overlay {
     display: none;
     position: fixed;
@@ -582,15 +569,9 @@
     overflow-y: auto;
   }
 
-  .modal-title {
-    font-size: 18px;
-    font-weight: 800;
-    margin-bottom: 8px;
-  }
-
-  .modal-sub { font-size: 13px; color: var(--muted); margin-bottom: 20px; }
-
-  .modal-list { list-style: none; display: flex; flex-direction: column; gap: 8px; margin-bottom: 20px; }
+  .modal-title { font-size: 18px; font-weight: 800; margin-bottom: 8px; }
+  .modal-sub   { font-size: 13px; color: var(--muted); margin-bottom: 20px; }
+  .modal-list  { list-style: none; display: flex; flex-direction: column; gap: 8px; margin-bottom: 20px; }
 
   .modal-item {
     background: var(--surface2);
@@ -601,256 +582,184 @@
     font-size: 13px;
     font-weight: 600;
   }
-
   .modal-item-id { font-size: 11px; color: var(--muted); font-family: 'JetBrains Mono', monospace; margin-top: 2px; }
 
   .modal-actions { display: flex; gap: 10px; justify-content: flex-end; }
 
-  /* ---- SCROLLBAR GLOBAL ---- */
+  /* ---- SCROLLBAR ---- */
   ::-webkit-scrollbar       { width: 6px; height: 6px; }
   ::-webkit-scrollbar-track { background: transparent; }
   ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 
-  .no-results {
-    padding: 24px;
-    text-align: center;
-    color: var(--muted);
-    font-size: 13px;
-  }
+  .no-results { padding: 24px; text-align: center; color: var(--muted); font-size: 13px; }
 
-  /* ---- REVIEWED STATE ---- */
-  .sidebar-item.reviewed-item { opacity: 0.45; }
-  .sidebar-item.reviewed-item .item-name { text-decoration: line-through; }
-
-  .badge-reviewed { background: rgba(34,197,94,0.15); color: var(--green); }
-
-  .review-card {
-    background: rgba(34,197,94,0.08);
-    border: 1px solid rgba(34,197,94,0.25);
-    border-left: 3px solid var(--green);
-    border-radius: 0 10px 10px 0;
-    padding: 12px 16px;
-    margin-bottom: 24px;
-    font-size: 13px;
-    line-height: 1.6;
-  }
-  .review-card .review-by   { font-weight: 700; color: var(--green); }
-  .review-card .review-time { color: var(--muted); font-family: 'JetBrains Mono', monospace; font-size: 11px; }
-  .review-card .review-note { margin-top: 6px; color: var(--text); white-space: pre-wrap; }
-
-  .mark-reviewed-btn {
-    padding: 9px 18px;
-    border-radius: 8px;
-    border: 1px solid var(--green);
-    background: rgba(34,197,94,0.1);
-    color: var(--green);
-    font-family: 'Syne', sans-serif;
-    font-size: 13px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.15s;
+  /* ---- TAG BADGES ---- */
+  .tag-row {
     display: flex;
-    align-items: center;
+    flex-wrap: wrap;
     gap: 6px;
+    margin-bottom: 20px;
   }
-  .mark-reviewed-btn:hover     { background: var(--green); color: #000; }
-  .mark-reviewed-btn.done      { background: var(--green); color: #000; border-color: var(--green); }
-
-  .unmark-btn {
-    padding: 5px 10px;
-    border-radius: 6px;
-    border: 1px solid rgba(239,68,68,0.4);
-    background: transparent;
-    color: var(--red);
-    font-family: 'Syne', sans-serif;
+  .tag-badge {
+    padding: 4px 10px;
+    border-radius: 20px;
     font-size: 11px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.15s;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    border: 1px solid rgba(124,58,237,0.4);
+    background: rgba(124,58,237,0.12);
+    color: #a78bfa;
+    font-family: 'JetBrains Mono', monospace;
   }
-  .unmark-btn:hover { background: rgba(239,68,68,0.15); }
 
-  /* ---- NAME PROMPT OVERLAY ---- */
-  .name-overlay {
-    display: none;
-    position: fixed;
-    inset: 0;
-    background: rgba(0,0,0,0.75);
-    backdrop-filter: blur(6px);
-    z-index: 200;
-    align-items: center;
-    justify-content: center;
-  }
-  .name-overlay.open { display: flex; }
-
-  .name-card {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 16px;
-    padding: 32px;
-    width: 90%;
-    max-width: 420px;
+  /* ---- RESOLVED-BY STRIPE ---- */
+  .resolved-by-stripe {
     display: flex;
-    flex-direction: column;
-    gap: 16px;
-  }
-  .name-card h2 { font-size: 20px; font-weight: 800; }
-  .name-card p  { font-size: 13px; color: var(--muted); line-height: 1.5; }
-
-  .name-input {
-    width: 100%;
-    background: var(--surface2);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 10px 14px;
-    color: var(--text);
-    font-family: 'Syne', sans-serif;
-    font-size: 15px;
-    font-weight: 600;
-    outline: none;
-    transition: border-color 0.15s;
-  }
-  .name-input:focus { border-color: var(--accent); }
-
-  .stat-chip.reviewed { background: rgba(34,197,94,0.12); border-color: rgba(34,197,94,0.3); color: var(--green); }
-
-  /* ---- NOTE PANEL ---- */
-  .note-panel {
-    background: var(--surface2);
-    border: 1px solid var(--border);
-    border-left: 3px solid var(--accent2);
-    border-radius: 0 10px 10px 0;
-    padding: 14px 16px;
-    margin-bottom: 24px;
-    display: none;
-    flex-direction: column;
+    align-items: center;
     gap: 10px;
+    padding: 10px 16px;
+    background: rgba(34,197,94,0.07);
+    border: 1px solid rgba(34,197,94,0.25);
+    border-left: 4px solid var(--green);
+    border-radius: 0 10px 10px 0;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
   }
-  .note-panel.open { display: flex; }
-
-  .note-panel-label {
+  .resolved-by-stripe .rbs-label {
     font-size: 11px;
     font-weight: 700;
-    color: var(--muted);
     text-transform: uppercase;
-    letter-spacing: 0.1em;
+    letter-spacing: 0.08em;
+    color: var(--green);
+    white-space: nowrap;
   }
-
-  .note-textarea {
-    width: 100%;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 10px 12px;
-    color: var(--text);
-    font-family: 'Syne', sans-serif;
-    font-size: 13px;
-    line-height: 1.6;
-    resize: vertical;
-    min-height: 80px;
-    outline: none;
-    transition: border-color 0.15s;
-  }
-  .note-textarea:focus { border-color: var(--accent2); }
-  .note-textarea::placeholder { color: var(--muted); font-style: italic; }
-
-  .note-panel-actions { display: flex; gap: 8px; }
-
-  .note-save-btn {
-    padding: 6px 14px;
-    border-radius: 7px;
-    border: 1px solid var(--accent2);
-    background: rgba(124,58,237,0.15);
-    color: var(--accent2);
-    font-family: 'Syne', sans-serif;
-    font-size: 12px;
+  .resolved-by-stripe .rbs-user {
+    font-size: 14px;
     font-weight: 700;
-    cursor: pointer;
-    transition: all 0.15s;
+    color: var(--text);
+    font-family: 'JetBrains Mono', monospace;
   }
-  .note-save-btn:hover { background: var(--accent2); color: #fff; }
-
-  .note-clear-btn {
-    padding: 6px 14px;
-    border-radius: 7px;
-    border: 1px solid var(--border);
-    background: transparent;
+  .resolved-by-stripe .rbs-time {
+    font-size: 11px;
     color: var(--muted);
-    font-family: 'Syne', sans-serif;
-    font-size: 12px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.15s;
+    font-family: 'JetBrains Mono', monospace;
+    margin-left: auto;
   }
-  .note-clear-btn:hover { border-color: var(--red); color: var(--red); }
-
-  .note-btn {
-    padding: 7px 16px;
-    border-radius: 8px;
-    border: 1px solid var(--border);
-    background: var(--surface);
-    color: var(--muted);
-    font-family: 'Syne', sans-serif;
-    font-size: 13px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.15s;
+  .changed-by-stripe {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 10px;
+    padding: 8px 16px;
+    background: rgba(79,142,247,0.06);
+    border: 1px solid rgba(79,142,247,0.2);
+    border-left: 4px solid var(--accent);
+    border-radius: 0 10px 10px 0;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
   }
-  .note-btn:hover        { border-color: var(--accent2); color: var(--accent2); }
-  .note-btn.has-note     { border-color: var(--accent2); color: var(--accent2); background: rgba(124,58,237,0.1); }
+  .changed-by-stripe .cbs-label {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--accent);
+    white-space: nowrap;
+  }
+  .changed-by-stripe .cbs-user {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  /* ---- ALARM HISTORY TIMELINE ---- */
+  .timeline {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    margin-bottom: 24px;
+    position: relative;
+    padding-left: 28px;
+  }
+  .timeline::before {
+    content: '';
+    position: absolute;
+    left: 10px; top: 12px; bottom: 12px;
+    width: 2px;
+    background: var(--border);
+  }
+  .timeline-entry {
+    position: relative;
+    padding: 8px 0 8px 12px;
+  }
+  .timeline-dot {
+    position: absolute;
+    left: -22px; top: 14px;
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    border: 2px solid var(--border);
+    background: var(--surface);
+  }
+  .timeline-dot.resolved   { background: var(--green);  border-color: var(--green); }
+  .timeline-dot.unresolved { background: var(--red);    border-color: var(--red); }
+  .timeline-dot.tag-add    { background: #a78bfa;       border-color: #7c3aed; }
+  .timeline-dot.tag-rem    { background: var(--muted);  border-color: var(--border); }
+  .timeline-entry-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .timeline-action {
+    font-size: 12px;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 4px;
+  }
+  .timeline-action.resolved   { background: rgba(34,197,94,0.15); color: var(--green); }
+  .timeline-action.unresolved { background: rgba(239,68,68,0.12); color: var(--red); }
+  .timeline-action.tag-add    { background: rgba(124,58,237,0.15); color: #a78bfa; }
+  .timeline-action.tag-rem    { background: rgba(100,116,139,0.15); color: var(--muted); }
+  .timeline-action.unknown    { background: rgba(100,116,139,0.12); color: var(--muted); }
+  .timeline-user {
+    font-size: 12px;
+    font-family: 'JetBrains Mono', monospace;
+    color: var(--text);
+  }
+  .timeline-ts {
+    font-size: 11px;
+    font-family: 'JetBrains Mono', monospace;
+    color: var(--muted);
+    margin-left: auto;
+  }
 </style>
 </head>
 <body>
 
-<!-- NAME PROMPT OVERLAY -->
-<div class="name-overlay open" id="nameOverlay">
-  <div class="name-card">
-    <h2>&#128100; Who is reviewing?</h2>
-    <p>Your name will be recorded with each exclusion you mark as reviewed, and saved in the review state file.</p>
-    <input class="name-input" id="reviewerNameInput" type="text" placeholder="Your name..." maxlength="80"
-           onkeydown="if(event.key==='Enter') confirmReviewerName()">
-    <button class="btn btn-accent" onclick="confirmReviewerName()">Start Review &rarr;</button>
-  </div>
-</div>
-
 <!-- DROP ZONE -->
 <div id="dropzone">
   <div class="drop-logo">ESET Inspect</div>
-  <h1 class="drop-title">Exclusion<br>Reviewer</h1>
-  <p class="drop-sub">Load your exported JSON file to review exclusions. Optionally load a previous review state file to skip already-reviewed items.</p>
+  <h1 class="drop-title">Detection<br>Reviewer</h1>
+  <p class="drop-sub">Load your exported JSON file to review detections with analyst notes and comments.</p>
   <div class="drop-box" id="dropBox" onclick="document.getElementById('fileInput').click()">
-    <div class="drop-icon">&#128196;</div>
+    <div class="drop-icon">&#128203;</div>
     <div class="drop-label">Drop JSON export here</div>
-    <div class="drop-hint">or click to browse &mdash; exported by Export-EsetInspectExclusions.ps1</div>
+    <div class="drop-hint">or click to browse &mdash; exported by Export-EsetInspectDetections.ps1</div>
   </div>
   <input type="file" id="fileInput" accept=".json">
-  <div style="display:flex;align-items:center;gap:12px;margin-top:8px">
-    <div style="flex:1;height:1px;background:var(--border)"></div>
-    <span style="font-size:12px;color:var(--muted)">optionally load previous review state</span>
-    <div style="flex:1;height:1px;background:var(--border)"></div>
-  </div>
-  <div class="drop-box" id="stateDropBox" onclick="document.getElementById('stateFileInput').click()" style="padding:20px 40px">
-    <div class="drop-icon" style="width:36px;height:36px;border-radius:10px;font-size:16px">&#128204;</div>
-    <div class="drop-label" style="font-size:13px">Load review state file</div>
-    <div class="drop-hint" id="stateFileHint">No state file loaded &mdash; load multiple files to merge reviews from different team members</div>
-  </div>
-  <input type="file" id="stateFileInput" accept=".json">
+  <div id="statusMsg" style="font-size:13px;color:var(--muted);text-align:center;max-width:460px;line-height:1.6;display:none;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px 20px;"></div>
 </div>
 
 <!-- APP -->
 <div id="app">
-  <!-- Top bar -->
+
+  <!-- Topbar -->
   <div class="topbar">
-    <div class="topbar-brand">ESET &mdash; Exclusion Reviewer</div>
+    <div class="topbar-brand">ESET &mdash; Detection Reviewer</div>
     <div class="topbar-stats" id="topbarStats"></div>
     <div class="topbar-spacer"></div>
     <div class="topbar-actions">
-      <button class="btn" onclick="toggleStatsPanel()">&#128202; Stats</button>
-      <button class="btn" onclick="openFlagModal()" id="exportFlagBtn">&#9873; Export Flagged</button>
-      <button class="btn btn-accent" onclick="saveStateFile()">&#128190; Save Review State</button>
+      <button class="btn" onclick="openFlagModal()">&#9873; Export Flagged</button>
       <button class="btn" onclick="resetApp()">&#8617; Load New File</button>
     </div>
   </div>
@@ -859,27 +768,19 @@
   <div class="filterbar">
     <div class="search-wrap">
       <span class="search-icon">&#128269;</span>
-      <input class="search-input" type="text" id="searchInput" placeholder="Search by name, note, rule ID..." oninput="applyFilters()">
+      <input class="search-input" type="text" id="searchInput" placeholder="Search threat, computer, rule, note, analyst..." oninput="applyFilters()">
     </div>
-    <span class="filter-label">Filter:</span>
-    <button class="filter-btn active" id="filterAll"        onclick="setFilter('all')" title="Clear all filters">All</button>
-    <button class="filter-btn"        id="filterPending"    onclick="toggleFilter('pending')" title="Not yet reviewed">Pending</button>
-    <button class="filter-btn"        id="filterReviewed"   onclick="toggleFilter('reviewed')" title="Marked as reviewed">Reviewed</button>
-    <button class="filter-btn"        id="filterEnabled"    onclick="toggleFilter('enabled')" title="Enabled exclusions">Enabled</button>
-    <button class="filter-btn"        id="filterDisabled"   onclick="toggleFilter('disabled')" title="Disabled exclusions">Disabled</button>
-    <button class="filter-btn"        id="filterFlagged"    onclick="toggleFilter('flagged')" title="Flagged for attention">Flagged</button>
-    <button class="filter-btn"        id="filterHasNote"    onclick="toggleFilter('hasnote')" title="Has a note">Has Note</button>
-    <button class="filter-btn"        id="filterNoRules"    onclick="toggleFilter('norules')" title="Not linked to any rule">No Rules</button>
-  </div>
-
-  <!-- Stats panel -->
-  <div class="stats-panel" id="statsPanel">
-    <div class="stats-header">
-      <span class="stats-title">&#128202; Exclusion Author Statistics</span>
-      <button class="stats-toggle" id="statsToggleMode" onclick="toggleStatsMode()" title="Switch between count and percent">Show %</button>
-      <span style="font-size:11px;color:var(--muted)">Click an author to exclude from stats</span>
-    </div>
-    <div class="stats-grid" id="statsGrid"></div>
+    <span class="filter-label">Severity:</span>
+    <button class="filter-btn active" id="fAll"     onclick="setSevFilter('all')">All</button>
+    <button class="filter-btn"        id="fThreat"  onclick="setSevFilter('threat')">Threat</button>
+    <button class="filter-btn"        id="fWarning" onclick="setSevFilter('warning')">Warning</button>
+    <button class="filter-btn"        id="fInfo"    onclick="setSevFilter('info')">Info</button>
+    <span class="filter-label">Status:</span>
+    <button class="filter-btn"        id="fUnres"   onclick="setStatusFilter('unresolved')">Unresolved</button>
+    <button class="filter-btn"        id="fRes"     onclick="setStatusFilter('resolved')">Resolved</button>
+    <button class="filter-btn"        id="fNote"    onclick="setStatusFilter('hasnote')">Has Note</button>
+    <button class="filter-btn"        id="fNoNote"  onclick="setStatusFilter('nonote')">No Note</button>
+    <button class="filter-btn"        id="fFlagged" onclick="setStatusFilter('flagged')">Flagged</button>
   </div>
 
   <!-- Main -->
@@ -889,17 +790,17 @@
     </aside>
     <section class="detail" id="detailPanel">
       <div class="detail-empty">
-        <div class="detail-empty-icon">&#128196;</div>
-        <div class="detail-empty-text">Select an exclusion from the list</div>
+        <div class="detail-empty-icon">&#128203;</div>
+        <div class="detail-empty-text">Select a detection from the list</div>
       </div>
     </section>
   </div>
 </div>
 
-<!-- Flag export modal -->
+<!-- Flag modal -->
 <div class="modal-overlay" id="flagModal">
   <div class="modal">
-    <div class="modal-title">&#9873; Flagged Exclusions</div>
+    <div class="modal-title">&#9873; Flagged Detections</div>
     <div class="modal-sub" id="flagModalSub"></div>
     <ul class="modal-list" id="flagList"></ul>
     <div class="modal-actions">
@@ -913,236 +814,265 @@
 // ============================================================
 // STATE
 // ============================================================
-let allData       = [];
-let filteredData  = [];
-let flagged       = new Set();
-let reviewed      = {};   // { id: { reviewerName, timestamp, note } }
-let notes         = {};   // { id: noteText } -- decoupled from reviewed so anyone can add notes
-let activeFilters      = new Set();
-let statsShowPct       = false;
-let excludedReviewers  = new Set();
-let currentIndex  = 0;
-let reviewerName  = '';
-let stateLoaded   = false;
-
-// ============================================================
-// REVIEWER NAME PROMPT
-// ============================================================
-function confirmReviewerName() {
-  const val = document.getElementById('reviewerNameInput').value.trim();
-  if (!val) {
-    document.getElementById('reviewerNameInput').style.borderColor = 'var(--red)';
-    return;
-  }
-  reviewerName = val;
-  document.getElementById('nameOverlay').classList.remove('open');
-}
+let allData      = [];
+let filtered     = [];
+let flagged      = new Set();
+let sevFilter    = 'all';
+let statusFilter = 'all';
+let curIdx       = 0;
 
 // ============================================================
 // FILE LOADING
 // ============================================================
-const dropzone      = document.getElementById('dropzone');
-const app           = document.getElementById('app');
-const fileInput     = document.getElementById('fileInput');
-const dropBox       = document.getElementById('dropBox');
-const stateDropBox  = document.getElementById('stateDropBox');
-const stateFileInput= document.getElementById('stateFileInput');
+const dropzone = document.getElementById('dropzone');
+const app      = document.getElementById('app');
+const dropBox  = document.getElementById('dropBox');
+const fi       = document.getElementById('fileInput');
 
-dropBox.addEventListener('dragover', e => { e.preventDefault(); dropzone.classList.add('drag-over'); dropBox.classList.add('active'); });
+dropBox.addEventListener('dragover',  e => { e.preventDefault(); dropzone.classList.add('drag-over'); dropBox.classList.add('active'); });
 dropBox.addEventListener('dragleave', () => { dropzone.classList.remove('drag-over'); dropBox.classList.remove('active'); });
 dropBox.addEventListener('drop', e => {
   e.preventDefault();
-  dropzone.classList.remove('drag-over');
-  dropBox.classList.remove('active');
-  const file = e.dataTransfer.files[0];
-  if (file) loadFile(file);
+  dropzone.classList.remove('drag-over'); dropBox.classList.remove('active');
+  if (e.dataTransfer.files[0]) loadFile(e.dataTransfer.files[0]);
 });
-fileInput.addEventListener('change', e => { if (e.target.files[0]) loadFile(e.target.files[0]); });
-stateFileInput.addEventListener('change', e => { if (e.target.files[0]) loadStateFile(e.target.files[0]); });
+fi.addEventListener('change', e => { if (e.target.files[0]) loadFile(e.target.files[0]); });
+
+function showStatus(msg, isError) {
+  const el = document.getElementById('statusMsg');
+  el.style.display = 'block';
+  el.style.color   = isError ? 'var(--red)' : 'var(--muted)';
+  el.style.borderColor = isError ? 'var(--red)' : 'var(--border)';
+  el.innerHTML = msg;
+}
 
 function loadFile(file) {
+  showStatus('Reading file: <strong>' + file.name + '</strong> (' + (file.size / 1024).toFixed(1) + ' KB)...', false);
+
   const reader = new FileReader();
+
+  reader.onerror = () => showStatus('FileReader error: could not read the file.', true);
+
   reader.onload = e => {
     try {
       // Strip UTF-8 BOM if present (PS 5.1 Out-File adds it)
-      let raw = e.target.result.replace(/^﻿/, '');
-      let parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) {
-        allData = parsed;
-      } else if (parsed.value && Array.isArray(parsed.value)) {
-        allData = parsed.value;
-      } else {
-        allData = [parsed];
-      }
-      allData = allData.map(d => ({
-        ...d,
-        enabled:    d.enabled === true || d.enabled === 'True' || d.enabled === 'true',
-        isDisabled: d.isDisabled === true || d.isDisabled === 'True' || d.isDisabled === 'true'
-            || !(d.enabled === true || d.enabled === 'True' || d.enabled === 'true'),
-        hasXml:     !!(d.xmlBody && d.xmlBody.trim() !== ''),
-        linkedRules: !!(d.rulesCount > 0 || (d.ruleIds && d.ruleIds.toString().trim() !== '')),
-        ruleCount:  d.rulesCount || d.ruleCount || 0,
-      }));
-      initApp();
-    } catch(err) {
-      alert('Failed to parse JSON file: ' + err.message);
-    }
-  };
-  reader.readAsText(file, 'UTF-8');
-}
+      const raw = e.target.result.replace(/^\uFEFF/, '');
+      showStatus('File read OK (' + (raw.length / 1024).toFixed(1) + ' KB). Parsing JSON...', false);
 
-function loadStateFile(file) {
-  const reader = new FileReader();
-  reader.onload = e => {
-    try {
-      const raw    = e.target.result.replace(/^﻿/, '');
-      const parsed = JSON.parse(raw);
-      // Validate it's a state file -- must have at least one of these keys
-      const isValidState = parsed.reviewed || parsed.flagged || parsed.notes;
-      if (!isValidState) {
-        alert('Not a valid review state file.\n\nTop-level keys found: ' + Object.keys(parsed).join(', '));
+      // Parse JSON
+      let parsed;
+      try {
+        parsed = JSON.parse(raw);
+      } catch(parseErr) {
+        showStatus(
+          '<strong>JSON parse error</strong><br>' + parseErr.message +
+          '<br><br>File size: ' + (raw.length / 1024).toFixed(1) + ' KB' +
+          '<br>The file may be truncated or contain invalid characters.' +
+          '<br><br>First 200 chars of file:<br><code style="font-size:11px;word-break:break-all">' +
+          raw.substring(0, 200).replace(/</g,'&lt;').replace(/>/g,'&gt;') + '</code>',
+          true);
         return;
       }
 
+      showStatus('JSON parsed OK. Unwrapping structure...', false);
 
-
-      let added = 0, skipped = 0;
-
-      // Merge reviewed entries
-      if (parsed.reviewed && typeof parsed.reviewed === 'object') {
-        Object.entries(parsed.reviewed).forEach(([id, entry]) => {
-          if (!reviewed[id]) { reviewed[id] = entry; added++; }
-          else skipped++;
-        });
-        // Extract inline notes from reviewed entries
-        Object.entries(parsed.reviewed).forEach(([id, entry]) => {
-          if (entry.note && !notes[id]) notes[id] = entry.note;
-        });
+      // Unwrap all possible shapes:
+      //   Plain array        [ {...}, {...} ]
+      //   Wrapped object     { "value": [...] }  or any key containing an array
+      //   Single object      { "id": 1, ... }
+      let records = [];
+      if (Array.isArray(parsed)) {
+        records = parsed;
+        showStatus('Structure: plain array, ' + records.length + ' items.', false);
+      } else if (parsed && typeof parsed === 'object') {
+        const keys     = Object.keys(parsed);
+        const arrayKey = keys.find(k => Array.isArray(parsed[k]));
+        if (arrayKey) {
+          records = parsed[arrayKey];
+          showStatus('Structure: wrapped object, key "' + arrayKey + '", ' + records.length + ' items.', false);
+        } else if (parsed.id !== undefined) {
+          records = [parsed];
+          showStatus('Structure: single detection object.', false);
+        } else {
+          showStatus(
+            '<strong>Unrecognised JSON structure.</strong><br>' +
+            'Expected an array of detections but got an object.<br>' +
+            'Top-level keys: <code>' + keys.join(', ') + '</code><br><br>' +
+            'Make sure you are loading the detections export, not the run log.',
+            true);
+          return;
+        }
       }
 
-      // Merge standalone notes
-      if (parsed.notes && typeof parsed.notes === 'object') {
-        Object.entries(parsed.notes).forEach(([id, text]) => {
-          if (!notes[id]) notes[id] = text;
-        });
+      if (records.length === 0) {
+        showStatus('<strong>File parsed OK but contains 0 detections.</strong><br>Check that the export ran successfully and contains data.', true);
+        return;
       }
 
-      // Merge flagged items -- always processed regardless of reviewed state
-      if (Array.isArray(parsed.flagged)) {
-        parsed.flagged.forEach(id => flagged.add(String(id)));
+      showStatus('Normalising ' + records.length + ' records...', false);
+
+      // Normalise each record individually -- one bad record does not crash the whole load
+      const errors = [];
+      allData = [];
+      records.forEach((d, i) => {
+        try {
+          allData.push(normalise(d));
+        } catch(normErr) {
+          errors.push('Record ' + i + ': ' + normErr.message);
+        }
+      });
+
+      if (allData.length === 0) {
+        showStatus(
+          '<strong>All ' + records.length + ' records failed to normalise.</strong><br>' +
+          'First error: ' + (errors[0] || 'unknown') + '<br><br>' +
+          'Sample record keys: <code>' + Object.keys(records[0]||{}).join(', ') + '</code>',
+          true);
+        return;
       }
 
-      stateLoaded = true;
-      const total      = Object.keys(reviewed).length;
-      const totalFlags = flagged.size;
-      const totalNotes = Object.keys(notes).length;
-      document.getElementById('stateFileHint').textContent =
-        `State merged: ${total} reviewed, ${totalFlags} flagged, ${totalNotes} notes (${added} new reviews added)`;
-      document.getElementById('stateDropBox').style.borderColor = 'var(--green)';
-      document.getElementById('stateDropBox').style.borderStyle = 'solid';
-      // If app already open, refresh
-      if (app.style.display !== 'none') { updateStats(); applyFilters(); }
+      if (errors.length > 0) {
+        console.warn('Skipped ' + errors.length + ' records:', errors.slice(0,5));
+      }
+
+      showStatus('Loaded ' + allData.length + ' detections. Opening...', false);
+      initApp();
+
     } catch(err) {
-      alert('Failed to parse state file: ' + err.message);
+      showStatus('<strong>Unexpected error:</strong><br>' + err.message + '<br><pre style="font-size:10px;white-space:pre-wrap">' + (err.stack||'') + '</pre>', true);
     }
   };
+
   reader.readAsText(file, 'UTF-8');
 }
 
+function normalise(d) {
+  const bool = v => v === true || v === 'True' || v === 'true';
+  const sev  = (d.severityLabel || scoreToSev(+d.severityScore || 0)).toLowerCase();
+
+  // commentsArray may be a real array, a JSON string, or null
+  let commentsArray = d.commentsArray;
+  if (typeof commentsArray === 'string') {
+    try { commentsArray = JSON.parse(commentsArray); } catch(e) { commentsArray = []; }
+  }
+  if (!Array.isArray(commentsArray)) commentsArray = [];
+
+  // tags may be an array, a CSV string, or null
+  let tags = d.tags;
+  if (typeof tags === 'string') {
+    tags = tags.split(',').map(t => t.trim()).filter(Boolean);
+  }
+  if (!Array.isArray(tags)) tags = [];
+
+  // alarmHistory: parse raw string into structured entries if present as string
+  // Format: "2026-10-09T12:30:00Z,90,DOMAIN\User; ..."  (newest first)
+  let alarmHistory = [];
+  const rawHist = d.alarmHistoryRaw || '';
+  if (rawHist) {
+    alarmHistory = rawHist.split('; ').map(entry => {
+      const parts = entry.trim().split(',');
+      if (parts.length < 3) return null;
+      const code = parts[1].trim();
+      const user = parts.slice(2).join(',').trim(); // handle commas in username
+      return { ts: parts[0].trim(), code, user };
+    }).filter(Boolean);
+  }
+
+  const noteStr     = d.note != null ? String(d.note) : '';
+  const commentsTxt = d.commentsText != null ? String(d.commentsText) : '';
+
+  return { ...d,
+    commentsArray,
+    tags,
+    alarmHistory,
+    resolved:     bool(d.resolved),
+    handled:      bool(d.handled),
+    autoResolved: bool(d.autoResolved),
+    _sev:         sev,
+    _hasNote:     !!(noteStr.trim()),
+    _hasComments: !!(commentsTxt.trim()) || commentsArray.length > 0,
+    _hasTags:     tags.length > 0,
+  };
+}
+
+function scoreToSev(s) {
+  if (s >= 70) return 'threat';
+  if (s >= 40) return 'warning';
+  return 'info';
+}
+
 function initApp() {
-  // Do NOT clear flagged/reviewed/notes here -- state file may have been
-  // loaded before the export, and initApp must not wipe it.
-  activeFilters.clear();
-  currentIndex  = 0;
+  flagged.clear(); sevFilter = 'all'; statusFilter = 'all'; curIdx = 0;
   document.getElementById('searchInput').value = '';
-  setFilter('all');
+  resetFilterBtns();
+  applyFilters();
   dropzone.style.display = 'none';
   app.style.display = 'flex';
   updateStats();
-  // Refresh stats panel if already open
-  const sp = document.getElementById('statsPanel');
-  if (sp && sp.classList.contains('open')) renderStats();
 }
 
 function resetApp() {
-  allData = []; filteredData = []; flagged.clear(); reviewed = {}; notes = {};
-  // Reviewer name is kept across sessions
+  allData = []; filtered = []; flagged.clear();
   app.style.display = 'none';
   dropzone.style.display = 'flex';
-  fileInput.value = '';
-  stateFileInput.value = '';
+  fi.value = '';
 }
 
 // ============================================================
-// FILTERING
+// FILTERS
 // ============================================================
-function setFilter(f) {
-  // 'all' clears all active filters
-  activeFilters.clear();
-  document.getElementById('filterAll').classList.add('active');
-  ['pending','reviewed','enabled','disabled','flagged','hasnote','norules'].forEach(k => {
-    const id  = 'filter' + k.charAt(0).toUpperCase() + k.slice(1);
-    const btn = document.getElementById(id);
-    if (btn) btn.classList.remove('active','active-red','active-yellow','active-green','active-purple');
-  });
-  applyFilters();
+function setSevFilter(f) {
+  sevFilter = sevFilter === f ? 'all' : f;
+  resetFilterBtns(); applyFilters();
 }
 
-function toggleFilter(f) {
-  // Toggle this filter on/off; multiple can be active simultaneously
-  if (activeFilters.has(f)) activeFilters.delete(f);
-  else activeFilters.add(f);
+function setStatusFilter(f) {
+  statusFilter = statusFilter === f ? 'all' : f;
+  resetFilterBtns(); applyFilters();
+}
 
-  // Update All button -- active only when nothing else is active
-  const allBtn = document.getElementById('filterAll');
-  if (allBtn) {
-    if (activeFilters.size === 0) allBtn.classList.add('active');
-    else allBtn.classList.remove('active');
-  }
-
-  // Update each filter button
-  const colorMap = { disabled: 'active-red', flagged: 'active-yellow', reviewed: 'active-green', hasnote: 'active-purple' };
-  ['pending','reviewed','enabled','disabled','flagged','hasnote','norules'].forEach(k => {
-    const id  = 'filter' + k.charAt(0).toUpperCase() + k.slice(1);
-    const btn = document.getElementById(id);
-    if (!btn) return;
-    btn.classList.remove('active','active-red','active-yellow','active-green','active-purple');
-    if (activeFilters.has(k)) btn.classList.add(colorMap[k] || 'active');
+function resetFilterBtns() {
+  const smap = { all: 'active', threat: 'active-red', warning: 'active-yellow', info: 'active' };
+  ['all','threat','warning','info'].forEach(k => {
+    const el = document.getElementById('f' + k.charAt(0).toUpperCase() + k.slice(1));
+    if (el) el.className = 'filter-btn' + (sevFilter === k ? ' ' + (smap[k]||'active') : '');
   });
-
-  applyFilters();
+  const stmap = { unresolved: 'active-red', resolved: 'active-green', hasnote: 'active-green', nonote: 'active', flagged: 'active-yellow' };
+  const stids = { unresolved:'fUnres', resolved:'fRes', hasnote:'fNote', nonote:'fNoNote', flagged:'fFlagged' };
+  Object.keys(stids).forEach(k => {
+    const el = document.getElementById(stids[k]);
+    if (el) el.className = 'filter-btn' + (statusFilter === k ? ' ' + (stmap[k]||'active') : '');
+  });
 }
 
 function applyFilters() {
   const q = document.getElementById('searchInput').value.toLowerCase().trim();
-  filteredData = allData.filter(d => {
-    const isRev     = !!reviewed[String(d.id)];
-    const isFlagged = flagged.has(String(d.id));
-    const hasNote   = !!(notes[String(d.id)] && notes[String(d.id)].trim());
-
-    // Multi-filter: ALL active filters must match (AND logic)
-    if (activeFilters.has('pending')   && isRev)             return false;
-    if (activeFilters.has('reviewed')  && !isRev)            return false;
-    if (activeFilters.has('enabled')   && d.isDisabled)      return false;
-    if (activeFilters.has('disabled')  && !d.isDisabled)     return false;
-    if (activeFilters.has('flagged')   && !isFlagged)        return false;
-    if (activeFilters.has('hasnote')   && !hasNote)          return false;
-    if (activeFilters.has('norules')   && d.linkedRules)     return false;
-
+  filtered = allData.filter(d => {
+    if (sevFilter !== 'all' && d._sev !== sevFilter) return false;
+    if (statusFilter === 'unresolved' && d.resolved)                      return false;
+    if (statusFilter === 'resolved'   && !d.resolved)                     return false;
+    if (statusFilter === 'hasnote'    && !d._hasNote && !d._hasComments)  return false;
+    if (statusFilter === 'nonote'     && (d._hasNote || d._hasComments))  return false;
+    if (statusFilter === 'flagged'    && !flagged.has(String(d.id)))              return false;
     if (q) {
-      const haystack = [d.name, d.note, d.ruleIds, d.ruleUuids, d.uuid,
-                        d.xmlBody, d.author, d.targets, d.ruleName,
-                        notes[String(d.id)]]
+      const hay = [d.threatName, d.ruleName, d.typeLabel, d.computerName,
+                   d.processUser, d.note, d.commentsText, d.moduleName,
+                   d.moduleSha1, d.processCommandLine, String(d.id||''),
+                   d.resolvedBy, d.changedBy, d.tagsText,
+                   Array.isArray(d.tags) ? d.tags.join(' ') : '']
         .filter(Boolean).join(' ').toLowerCase();
-      if (!haystack.includes(q)) return false;
+      if (!hay.includes(q)) return false;
     }
     return true;
   });
-
-  currentIndex = 0;
+  curIdx = 0;
   renderSidebar();
-  if (filteredData.length > 0) renderDetail(0);
-  else document.getElementById('detailPanel').innerHTML = '<div class="detail-empty"><div class="detail-empty-icon">&#128269;</div><div class="detail-empty-text">No exclusions match the current filter</div></div>';
+  if (filtered.length > 0) renderDetail(0);
+  else document.getElementById('detailPanel').innerHTML = `
+    <div class="detail-empty">
+      <div class="detail-empty-icon">&#128269;</div>
+      <div class="detail-empty-text">No detections match the current filter</div>
+    </div>`;
 }
 
 // ============================================================
@@ -1150,544 +1080,319 @@ function applyFilters() {
 // ============================================================
 function renderSidebar() {
   const list = document.getElementById('sidebarList');
-  if (filteredData.length === 0) {
-    list.innerHTML = '<li class="no-results">No results</li>';
-    return;
-  }
-  list.innerHTML = filteredData.map((d, i) => {
-    const isFlagged  = flagged.has(String(d.id));
-    const isRev      = !!reviewed[String(d.id)];
-    const statusBadge = d.isDisabled
-      ? '<span class="badge badge-disabled">DISABLED</span>'
-      : '<span class="badge badge-enabled">ENABLED</span>';
-    const ruleBadge  = d.linkedRules
-      ? `<span class="badge badge-rules">${d.ruleCount} rule${d.ruleCount !== 1 ? 's' : ''}</span>`
-      : '';
-    const flagBadge  = isFlagged ? '<span class="badge badge-flag">&#9873;</span>' : '';
-    const revBadge   = isRev ? '<span class="badge badge-reviewed">&#10003;</span>' : '';
-    const noteBadge  = notes[String(d.id)] ? '<span class="badge" style="background:rgba(124,58,237,0.15);color:var(--accent2)">&#128221;</span>' : '';
-    const xmlBadge   = !d.hasXml ? '<span class="badge badge-noxml">no XML</span>' : '';
-    return `<li class="sidebar-item${i === currentIndex ? ' active' : ''}${isFlagged ? ' flagged-item' : ''}${isRev ? ' reviewed-item' : ''}"
-               onclick="selectItem(${i})">
-      <div class="item-name" title="${esc(d.name || '(unnamed)')}">${esc(d.name || '(unnamed)')}</div>
-      <div class="item-meta">${statusBadge}${ruleBadge}${revBadge}${noteBadge}${flagBadge}${xmlBadge}</div>
+  if (filtered.length === 0) { list.innerHTML = '<li class="no-results">No results</li>'; return; }
+
+  list.innerHTML = filtered.map((d, i) => {
+    const sevCls  = d._sev === 'threat' ? 'badge-threat' : d._sev === 'warning' ? 'badge-warning' : 'badge-info';
+    const resCls  = d.resolved ? 'badge-resolved' : 'badge-unres';
+    const noteBadge = (d._hasNote || d._hasComments) ? '<span class="badge badge-note">NOTE</span>' : '';
+    const tagBadge  = d._hasTags ? '<span class="badge" style="background:rgba(124,58,237,0.15);color:#a78bfa">TAG</span>' : '';
+    const flagBadge = flagged.has(String(d.id)) ? '<span class="badge badge-flag">&#9873;</span>' : '';
+    const sub = d._hasNote
+      ? esc(String(d.note).substring(0, 55)) + (String(d.note).length > 55 ? '...' : '')
+      : d._hasComments ? '(has analyst comments)' : esc(d.computerName || '');
+    return `<li class="sidebar-item${i === curIdx ? ' active' : ''}${flagged.has(String(d.id)) ? ' flagged-item' : ''}" onclick="selectItem(${i})">
+      <div class="item-name" title="${esc(d.threatName || d.ruleName || d.typeLabel || '(unknown)')}">${esc(d.threatName || d.ruleName || d.typeLabel || '(unknown)')}</div>
+      <div class="item-meta">
+        <span class="badge ${sevCls}">${d._sev.toUpperCase()}</span>
+        <span class="badge ${resCls}">${d.resolved ? 'RESOLVED' : 'OPEN'}</span>
+        ${noteBadge}${tagBadge}${flagBadge}
+      </div>
+      <div class="item-sub">${sub}</div>
     </li>`;
   }).join('');
 }
 
 function selectItem(i) {
-  currentIndex = i;
+  curIdx = i;
   renderSidebar();
   renderDetail(i);
-  const items = document.querySelectorAll('.sidebar-item');
-  if (items[i]) items[i].scrollIntoView({ block: 'nearest' });
+  document.querySelectorAll('.sidebar-item')[i]?.scrollIntoView({ block: 'nearest' });
+}
+
+function navigate(dir) {
+  const n = curIdx + dir;
+  if (n >= 0 && n < filtered.length) selectItem(n);
 }
 
 // ============================================================
-// DETAIL PANEL
+// DETAIL
 // ============================================================
 function renderDetail(i) {
-  const d = filteredData[i];
+  const d = filtered[i];
   if (!d) return;
 
   const isFlagged = flagged.has(String(d.id));
-  const revEntry  = reviewed[String(d.id)];
-  const isRev     = !!revEntry;
-  const hasNote   = !!(notes[String(d.id)] && notes[String(d.id)].trim());
+  const sevCls    = d._sev === 'threat' ? 'badge-threat' : d._sev === 'warning' ? 'badge-warning' : 'badge-info';
+  const valCls    = d._sev === 'threat' ? 'red' : d._sev === 'warning' ? 'yellow' : 'blue';
+  const resCls    = d.resolved ? 'badge-resolved' : 'badge-unres';
+  const date      = d.creationTime ? new Date(d.creationTime).toLocaleString() : 'Unknown';
 
-  const statusBadge = d.isDisabled
-    ? '<span class="badge badge-disabled" style="font-size:13px;padding:4px 10px">DISABLED</span>'
-    : '<span class="badge badge-enabled"  style="font-size:13px;padding:4px 10px">ENABLED</span>';
+  // ---- Tags ----
+  let tagsHtml = '';
+  if (d._hasTags && d.tags.length > 0) {
+    const badges = d.tags.map(t => `<span class="tag-badge">${esc(t)}</span>`).join('');
+    tagsHtml = `<div class="tag-row">${badges}</div>`;
+  }
 
-  // Reviewed status block
-  const reviewedHtml = isRev
-    ? `<div class="review-card">
-        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
-          <div>
-            <span class="review-by">&#10003; Reviewed by ${esc(revEntry.reviewerName)}</span>
-            &nbsp;&nbsp;
-            <span class="review-time">${esc(new Date(revEntry.timestamp).toLocaleString())}</span>
+  // ---- Resolved-by stripe ----
+  let resolvedByHtml = '';
+  const resolvedBy = d.resolvedBy ? String(d.resolvedBy) : '';
+  const changedBy  = d.changedBy  ? String(d.changedBy)  : '';
+  if (d.resolved && resolvedBy) {
+    const resolvedAt = d.resolvedAt ? new Date(d.resolvedAt).toLocaleString() : '';
+    resolvedByHtml = `<div class="resolved-by-stripe">
+      <span class="rbs-label">&#10003; Resolved by</span>
+      <span class="rbs-user">${esc(resolvedBy)}</span>
+      ${resolvedAt ? `<span class="rbs-time">${esc(resolvedAt)}</span>` : ''}
+    </div>`;
+  } else if (d.resolved && changedBy && !resolvedBy) {
+    // fallback: changedBy when no history parse succeeded
+    resolvedByHtml = `<div class="resolved-by-stripe">
+      <span class="rbs-label">&#10003; Resolved (last modified by)</span>
+      <span class="rbs-user">${esc(changedBy)}</span>
+    </div>`;
+  } else if (changedBy && changedBy !== resolvedBy) {
+    resolvedByHtml = `<div class="changed-by-stripe">
+      <span class="cbs-label">Last modified by</span>
+      <span class="cbs-user">${esc(changedBy)}</span>
+    </div>`;
+  }
+
+  // ---- Alarm history timeline ----
+  let historyHtml = '';
+  if (Array.isArray(d.alarmHistory) && d.alarmHistory.length > 0) {
+    const codeInfo = {
+      '10': { label: 'Resolved',    cls: 'resolved'   },
+      '11': { label: 'Unresolved',  cls: 'unresolved' },
+      '90': { label: 'Tag Added',   cls: 'tag-add'    },
+      '91': { label: 'Tag Removed', cls: 'tag-rem'    },
+    };
+    const entries = d.alarmHistory.map(e => {
+      const info = codeInfo[e.code] || { label: 'Status ' + e.code, cls: 'unknown' };
+      const ts = e.ts ? (() => { try { return new Date(e.ts).toLocaleString(); } catch(_) { return e.ts; } })() : '';
+      return `<div class="timeline-entry">
+        <div class="timeline-dot ${info.cls}"></div>
+        <div class="timeline-entry-row">
+          <span class="timeline-action ${info.cls}">${esc(info.label)}</span>
+          <span class="timeline-user">${esc(e.user || '')}</span>
+          ${ts ? `<span class="timeline-ts">${esc(ts)}</span>` : ''}
+        </div>
+      </div>`;
+    }).join('');
+    historyHtml = `
+      <div class="section-label">Alarm History</div>
+      <div class="timeline">${entries}</div>`;
+  }
+
+  // ---- Analyst note ----
+  const noteHtml = `
+    <div class="section-label">Analyst Note / Conclusion</div>
+    <div class="note-block${d._hasNote ? '' : ' empty'}">${d._hasNote ? esc(String(d.note)) : 'No analyst note recorded for this detection.'}</div>`;
+
+  // ---- Comments thread ----
+  const comments = getComments(d);
+  let commentsHtml = '';
+  if (comments.length > 0) {
+    const cards = comments.map(c => {
+      const initials = (c.authorName || '?').replace(/[\\@]/g, ' ').trim().split(/\s+/).map(x => x[0]||'').join('').toUpperCase().substring(0,2) || '?';
+      const ts       = c.creationTime ? new Date(c.creationTime).toLocaleString() : '';
+      const edited   = (c.edited || c.lastEditTime) ? '<span class="comment-edited">(edited)</span>' : '';
+      const color    = strColor(c.authorName || '?');
+      return `<div class="comment-card">
+        <div class="comment-avatar" style="background:${color}">${esc(initials)}</div>
+        <div>
+          <div class="comment-meta">
+            <span class="comment-author">${esc(c.authorName || 'Unknown')}</span>
+            <span class="comment-time">${ts}</span>
+            ${edited}
           </div>
-          <button class="unmark-btn" onclick="unmarkReviewed('${d.id}')">&#8617; Mark as Pending</button>
         </div>
+        <div class="comment-body">${esc(c.comment || c.commentValue || '')}</div>
+      </div>`;
+    }).join('');
+    commentsHtml = `
+      <div class="section-label">Analyst Discussion (${comments.length} comment${comments.length !== 1 ? 's' : ''})</div>
+      <div class="comment-thread">${cards}</div>`;
+  }
 
-      </div>`
-    : '';
+  // ---- Facts grid ----
+  const facts = [
+    { l: 'Detection ID',   v: d.id,                 c: 'blue' },
+    { l: 'Created',        v: date,                  c: '' },
+    { l: 'Computer',       v: d.computerName,        c: '' },
+    { l: 'IPv4',           v: d.computerIpv4,        c: '' },
+    { l: 'MAC',            v: d.computerMac,         c: '' },
+    { l: 'User',           v: d.processUser,         c: '' },
+    { l: 'Rule',           v: d.ruleName,            c: '' },
+    { l: 'Type',           v: d.typeLabel,           c: '' },
+    { l: 'Severity Score', v: d.severityScore,       c: valCls },
+    { l: 'Priority',       v: d.priority,            c: '' },
+    { l: 'Resolved',       v: d.resolved ? 'Yes' : 'No', c: d.resolved ? 'green' : 'red' },
+    { l: 'Resolved By',   v: d.resolvedBy || null,       c: 'green' },
+    { l: 'Resolved At',   v: d.resolvedAt ? (() => { try { return new Date(d.resolvedAt).toLocaleString(); } catch(_) { return d.resolvedAt; }})() : null, c: '' },
+    { l: 'Auto-Resolved',  v: d.autoResolved ? 'Yes' : 'No', c: '' },
+    { l: 'Handled',        v: d.handled ? 'Yes' : 'No', c: '' },
+    { l: 'Occurrences',    v: d.occurrenceCount,     c: '' },
+    { l: 'LG Reputation',  v: d.moduleLgReputation != null ? `${d.moduleLgReputation} / 9` : null, c: '' },
+    { l: 'LG Age (days)',  v: d.moduleLgAge,         c: '' },
+  ].map(f => {
+    const val = f.v != null && String(f.v).trim() !== '' && String(f.v) !== 'undefined';
+    return `<div class="field-card">
+      <div class="field-label">${f.l}</div>
+      <div class="field-value${val ? (f.c ? ' '+f.c : '') : ' empty'}">${val ? esc(String(f.v)) : 'n/a'}</div>
+    </div>`;
+  }).join('');
 
-  // Rules section
-  const ruleIdsArr   = d.ruleIds   ? d.ruleIds.toString().split(',').map(x => x.trim()).filter(Boolean) : [];
-  const ruleUuidsArr = d.ruleUuids ? d.ruleUuids.toString().split(',').map(x => x.trim()).filter(Boolean) : [];
-  const ruleNamesArr = d.ruleName  ? d.ruleName.toString().split(';').map(x => x.trim()).filter(Boolean) : [];
-  const rulesHtml = ruleIdsArr.length > 0
-    ? ruleIdsArr.map((id, idx) => {
-        const name = ruleNamesArr[idx] ? `<div style="font-size:11px;color:var(--muted);margin-top:2px">${esc(ruleNamesArr[idx])}</div>` : '';
-        return `<div class="rule-chip" style="display:flex;flex-direction:column">Rule ID: ${esc(id)}${name}</div>`;
-      }).join('')
-    : (d.rulesCount > 0
-        ? `<span class="rule-chip">${d.rulesCount} rule${d.rulesCount!==1?'s':''} (IDs not available in this export)</span>`
-        : '<span style="color:var(--muted);font-size:13px;font-style:italic">Not linked to any rule (global exclusion)</span>');
+  // ---- Threat & module block ----
+  const modLines = [
+    d.threatName           ? `Threat     : ${d.threatName}`                       : null,
+    d.threatUri            ? `URI        : ${d.threatUri}`                         : null,
+    d.moduleName           ? `Module     : ${d.moduleName}`                        : null,
+    d.moduleSha1           ? `SHA1       : ${d.moduleSha1}`                        : null,
+    d.moduleSha256         ? `SHA256     : ${d.moduleSha256}`                      : null,
+    d.moduleSigner         ? `Signer     : ${d.moduleSigner}`                      : null,
+    d.moduleSignatureLabel ? `Signature  : ${d.moduleSignatureLabel}`              : null,
+    d.moduleLgPopularity != null ? `LG Pop     : ${d.moduleLgPopularity}`          : null,
+  ].filter(Boolean).join('\n');
 
-  // XML
-  const xmlHtml = d.hasXml
-    ? `<div class="xml-wrap">
-        <div class="xml-toolbar">
-          <span class="xml-toolbar-label">XML Criteria Body</span>
-          <button class="copy-btn" id="copyBtn" onclick="copyXml()">Copy XML</button>
-        </div>
-        <div class="xml-code" id="xmlCode">${highlightXml(prettyXml(d.xmlBody))}</div>
-       </div>`
-    : `<div class="xml-wrap">
-        <div class="xml-toolbar"><span class="xml-toolbar-label">XML Criteria Body</span></div>
-        <div class="xml-empty">No XML body &mdash; this is a standard criteria exclusion or was exported without -FetchDetails</div>
-       </div>`;
-
-  const noteDisplayHtml = hasNote
-    ? '<div class="section-label">&#128221; Note</div>' +
-      '<div class="note-block" style="border-left-color:var(--accent2);margin-bottom:20px">' + esc(notes[String(d.id)]) + '</div>'
-    : '';
+  // ---- Process block ----
+  const procLines = [
+    d.processName        ? `Process    : ${d.processName}`                         : null,
+    d.processPath        ? `Path       : ${d.processPath}`                         : null,
+    d.processCommandLine ? `Command    : ${d.processCommandLine}`                  : null,
+    d.processUser        ? `User       : ${d.processUser}`                         : null,
+    d.parentProcessName  ? `Parent     : ${d.parentProcessName}`                   : null,
+    d.moduleFirstSeenLocally      ? `First Seen : ${d.moduleFirstSeenLocally}`     : null,
+    d.moduleLastExecutedLocally   ? `Last Exec  : ${d.moduleLastExecutedLocally}`  : null,
+  ].filter(Boolean).join('\n');
 
   document.getElementById('detailPanel').innerHTML = `
     <div class="detail-nav">
-      <button class="nav-btn" onclick="navigate(-1)" ${i === 0 ? 'disabled' : ''}>&larr; Prev</button>
-      <span class="nav-counter">${i + 1} / ${filteredData.length}</span>
-      <button class="nav-btn" onclick="navigate(1)" ${i === filteredData.length - 1 ? 'disabled' : ''}>Next &rarr;</button>
+      <button class="nav-btn" onclick="navigate(-1)" ${i===0?'disabled':''}>&larr; Prev</button>
+      <span class="nav-counter">${i+1} / ${filtered.length}</span>
+      <button class="nav-btn" onclick="navigate(1)" ${i===filtered.length-1?'disabled':''}>Next &rarr;</button>
       <div style="flex:1"></div>
-      <button class="mark-reviewed-btn${isRev ? ' done' : ''}" onclick="markReviewed('${d.id}')">
-        ${isRev ? '&#10003; Reviewed' : '&#10003; Mark as Reviewed'}
-      </button>
-      <button class="note-btn${hasNote ? ' has-note' : ''}" onclick="toggleNotePanel('${d.id}')" title="Add or edit a note">
-        &#128221; ${hasNote ? 'Edit Note' : 'Add Note'}
-      </button>
-      <button class="flag-btn${isFlagged ? ' flagged' : ''}" onclick="toggleFlag('${d.id}')">
-        &#9873; ${isFlagged ? 'Unflag' : 'Flag'}
+      <button class="flag-btn${isFlagged?' flagged':''}" onclick="toggleFlag('${d.id}')">
+        &#9873; ${isFlagged ? 'Unflag' : 'Flag for review'}
       </button>
     </div>
-
-    ${reviewedHtml}
-
-    <div class="note-panel" id="notePanel">
-      <div class="note-panel-label">&#128221; Note</div>
-      <textarea class="note-textarea" id="noteTextarea" placeholder="Add a note about this exclusion..." rows="4">${hasNote ? esc(getNoteForId('${d.id}')) : ''}</textarea>
-      <div class="note-panel-actions">
-        <button class="note-save-btn" onclick="saveNote('${d.id}')">Save Note</button>
-        <button class="note-clear-btn" onclick="clearNote('${d.id}')">Clear</button>
-        <button class="note-clear-btn" onclick="toggleNotePanel('${d.id}')">Cancel</button>
-      </div>
-    </div>
-
-    ${noteDisplayHtml}
 
     <div class="detail-header">
-      <div class="detail-title">${esc(d.name || '(unnamed)')}</div>
-      <div class="detail-badges">${statusBadge}</div>
-    </div>
-
-    <div class="fields-grid">
-      <div class="field-card">
-        <div class="field-label">ID</div>
-        <div class="field-value">${esc(String(d.id ?? ''))}</div>
-      </div>
-      <div class="field-card">
-        <div class="field-label">Author</div>
-        <div class="field-value ${d.author && d.author.trim() ? '' : 'empty'}">${d.author && d.author.trim() ? esc(d.author) : 'n/a'}</div>
-      </div>
-      <div class="field-card">
-        <div class="field-label">Created</div>
-        <div class="field-value ${d.timestamp ? '' : 'empty'}">${d.timestamp ? esc(new Date(d.timestamp).toLocaleString()) : 'n/a'}</div>
-      </div>
-      <div class="field-card">
-        <div class="field-label">Access Group</div>
-        <div class="field-value ${d.accessGroup ? '' : 'empty'}">${d.accessGroup ? esc(d.accessGroup) : 'n/a'}</div>
-      </div>
-      <div class="field-card">
-        <div class="field-label">Type</div>
-        <div class="field-value" style="color:${d.isAdvanced ? 'var(--accent2)' : 'var(--accent)'}">${d.isAdvanced ? 'Advanced (XML Query)' : 'Standard (Criteria)'}</div>
-      </div>
-      <div class="field-card">
-        <div class="field-label">Internal (ESET)</div>
-        <div class="field-value" style="color:${d.isInternal ? 'var(--yellow)' : 'var(--green)'}">${d.isInternal ? 'Yes' : 'No'}</div>
-      </div>
-      <div class="field-card">
-        <div class="field-label">Hit Count</div>
-        <div class="field-value ${d.hitCount ? '' : 'empty'}">${d.hitCount ?? 0}</div>
-      </div>
-      <div class="field-card">
-        <div class="field-label">Linked Rules</div>
-        <div class="field-value" style="color:${d.linkedRules ? 'var(--accent)' : 'var(--muted)'}">${d.ruleCount || 0} rule${d.ruleCount !== 1 ? 's' : ''}</div>
-      </div>
-      <div class="field-card">
-        <div class="field-label">Has XML Body</div>
-        <div class="field-value" style="color:${d.hasXml ? 'var(--green)' : 'var(--muted)'}">${d.hasXml ? 'Yes' : 'No'}</div>
-      </div>
-      <div class="field-card">
-        <div class="field-label">UUID</div>
-        <div class="field-value" style="font-size:11px">${esc(d.uuid ?? '')}</div>
+      <div class="detail-title">${esc(d.threatName || d.ruleName || d.typeLabel || 'Unknown Detection')}</div>
+      <div class="detail-badges">
+        <span class="badge ${sevCls}" style="font-size:12px;padding:4px 10px">${(d._sev||'info').toUpperCase()}</span>
+        <span class="badge ${resCls}" style="font-size:12px;padding:4px 10px">${d.resolved?'RESOLVED':'OPEN'}</span>
       </div>
     </div>
 
-    <div class="section-label">Note</div>
-    <div class="note-block${!d.note || d.note.trim() === '' ? ' empty' : ''}">${d.note && d.note.trim() !== '' ? esc(d.note) : 'No note set'}</div>
+    ${tagsHtml}
+    ${resolvedByHtml}
+    ${noteHtml}
+    ${commentsHtml}
+    ${historyHtml}
 
-    <div class="section-label">Targets</div>
-    <div class="note-block${!d.targets || d.targets.trim() === '' || d.targets === 'All' ? ' empty' : ''}" style="margin-bottom:24px">
-      ${d.targets && d.targets.trim() && d.targets !== 'All'
-        ? esc(d.targets).replace(/,\s*/g, '<br>')
-        : (d.targets === 'All' ? 'All computers' : 'No specific targets defined')}
-    </div>
+    <div class="section-label">Detection Facts</div>
+    <div class="fields-grid">${facts}</div>
 
-    <div class="section-label">Criteria Summary</div>
-    <div class="fields-grid" style="margin-bottom:24px">
-      ${[['Files', d.criteriaFiles], ['Paths', d.criteriaPaths], ['CMD Lines', d.criteriaCmdLine],
-         ['Signers', d.criteriaSigners], ['Hashes', d.criteriaHashes], ['Users', d.criteriaUsers]]
-        .map(([l,v]) => `<div class="field-card">
-          <div class="field-label">${l}</div>
-          <div class="field-value ${v ? '' : 'empty'}">${v || 0}</div>
-        </div>`).join('')}
-    </div>
+    ${modLines ? `<div class="mono-block">
+      <div class="mono-toolbar"><span class="mono-toolbar-label">Threat &amp; Module</span></div>
+      <div class="mono-body">${esc(modLines)}</div>
+    </div>` : ''}
 
-    <div class="section-label">Linked Rules</div>
-    <div class="rules-block">${rulesHtml}</div>
-
-    ${xmlHtml}
+    ${procLines ? `<div class="mono-block">
+      <div class="mono-toolbar"><span class="mono-toolbar-label">Process Context</span></div>
+      <div class="mono-body">${esc(procLines)}</div>
+    </div>` : ''}
   `;
 }
 
 // ============================================================
-// REVIEW STATE
+// HELPERS
 // ============================================================
-function markReviewed(id) {
-  id = String(id);
-  if (reviewed[id]) { unmarkReviewed(id); return; }
-
-  reviewed[id] = {
-    reviewerName: reviewerName || 'Unknown',
-    timestamp:    new Date().toISOString(),
-    note:         (notes[id] || '').trim(),  // use note if already written
-    exclusionId:  id,
-  };
-  updateStats();
-  renderSidebar();
-  renderDetail(currentIndex);
-  // Auto-advance to next unreviewed item
-  const next = filteredData.slice(currentIndex + 1).findIndex(x => !reviewed[String(x.id)]);
-  if (next !== -1) selectItem(currentIndex + 1 + next);
-}
-
-function unmarkReviewed(id) {
-  id = String(id);
-  delete reviewed[id];
-  updateStats();
-  renderSidebar();
-  renderDetail(currentIndex);
-}
-
-function getNoteForId(id) {
-  return notes[String(id)] || '';
-}
-
-function toggleNotePanel(id) {
-  const panel = document.getElementById('notePanel');
-  if (!panel) return;
-  const isOpen = panel.classList.contains('open');
-  if (isOpen) {
-    panel.classList.remove('open');
-  } else {
-    // Pre-fill textarea with existing note
-    const ta = document.getElementById('noteTextarea');
-    if (ta) ta.value = notes[String(id)] || '';
-    panel.classList.add('open');
-    if (ta) ta.focus();
+function getComments(d) {
+  if (Array.isArray(d.commentsArray) && d.commentsArray.length > 0) return d.commentsArray;
+  if (d.commentsText && String(d.commentsText).trim()) {
+    return String(d.commentsText).split(/  \|  /).map(p => {
+      const m = p.match(/^\[([^\|]+)\|([^\]]+)\]\s*([\s\S]*)/);
+      if (m) return { creationTime: m[1].trim(), authorName: m[2].trim(), comment: m[3].trim() };
+      return { authorName: 'Unknown', comment: p.trim() };
+    }).filter(c => c.comment);
   }
+  return [];
 }
 
-function saveNote(id) {
-  id = String(id);
-  const ta = document.getElementById('noteTextarea');
-  if (!ta) return;
-  const text = ta.value.trim();
-  if (text) {
-    notes[id] = text;
-    // Also update the note on the reviewed entry if it exists
-    if (reviewed[id]) reviewed[id].note = text;
-  } else {
-    delete notes[id];
-    if (reviewed[id]) reviewed[id].note = '';
-  }
-  // Close the panel and refresh
-  const panel = document.getElementById('notePanel');
-  if (panel) panel.classList.remove('open');
-  updateStats();
-  renderSidebar();
-  renderDetail(currentIndex);
-}
-
-function clearNote(id) {
-  id = String(id);
-  const ta = document.getElementById('noteTextarea');
-  if (ta) ta.value = '';
-  delete notes[id];
-  if (reviewed[id]) reviewed[id].note = '';
-  const panel = document.getElementById('notePanel');
-  if (panel) panel.classList.remove('open');
-  updateStats();
-  renderSidebar();
-  renderDetail(currentIndex);
-}
-
-function saveStateFile() {
-  const revCount = Object.keys(reviewed).length;
-  const hasAnything = revCount > 0 || flagged.size > 0 || Object.keys(notes).length > 0;
-  if (!hasAnything) {
-    alert('Nothing to save yet -- mark some exclusions as reviewed, flag them, or add notes first.');
-    return;
-  }
-
-  // Build a summary of who has reviewed what, for the audit header
-  const byReviewer = {};
-  Object.values(reviewed).forEach(e => {
-    const name = e.reviewerName || 'Unknown';
-    byReviewer[name] = (byReviewer[name] || 0) + 1;
-  });
-
-  // Sync any standalone notes into reviewed entries before saving
-  Object.entries(notes).forEach(([id, text]) => {
-    if (!reviewed[id]) return;  // note without review stays in notes only
-    reviewed[id].note = text;
-  });
-
-  const state = {
-    _info:          'ESET Inspect Exclusion Review State File -- save this back to the shared file share to keep everyone in sync',
-    _savedAt:       new Date().toISOString(),
-    _savedBy:       reviewerName || 'Unknown',
-    _totalReviewed: revCount,
-    _totalFlagged:  flagged.size,
-    _reviewerSummary: byReviewer,
-    _usage:         'Load this file alongside a new exclusion export to skip already-reviewed items. Multiple state files can be loaded one after another -- they are merged.',
-    reviewed,
-    notes,
-    flagged: Array.from(flagged),
-  };
-
-  const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
-  const a    = document.createElement('a');
-  a.href     = URL.createObjectURL(blob);
-  // Fixed filename so reviewers always overwrite the same file on the share
-  a.download = 'ESET_ExclusionReviewState.json';
-  a.click();
-}
-
-// ============================================================
-// STATS
-// ============================================================
-function updateStats() {
-  const total    = allData.length;
-  const enabled  = allData.filter(d => !d.isDisabled).length;
-  const disabled = allData.filter(d =>  d.isDisabled).length;
-  const nRev     = Object.keys(reviewed).filter(id => allData.some(d => String(d.id) === id)).length;
-  const pending  = total - nRev;
-  const nFlagged = flagged.size;
-  document.getElementById('topbarStats').innerHTML = '<span class="stat-chip total">Total: ' + total + '</span>'
-    + '<span class="stat-chip enabled">Enabled: ' + enabled + '</span>'
-    + '<span class="stat-chip disabled">Disabled: ' + disabled + '</span>'
-    + '<span class="stat-chip reviewed">Reviewed: ' + nRev + '</span>'
-    + '<span class="stat-chip flagged">Pending: ' + pending + ' &nbsp;|&nbsp; Flagged: ' + nFlagged + '</span>';
-  // Refresh stats panel if open
-  const sp = document.getElementById('statsPanel');
-  if (sp && sp.classList.contains('open')) renderStats();
-}
-
-// ============================================================
-// FLAG / EXPORT
-// ============================================================
-function toggleFlag(id) {
-  id = String(id);
-  if (flagged.has(id)) flagged.delete(id);
-  else flagged.add(id);
-  updateStats();
-  renderSidebar();
-  renderDetail(currentIndex);
-}
-
-function openFlagModal() {
-  const flaggedItems = allData.filter(d => flagged.has(String(d.id)));
-  const sub = document.getElementById('flagModalSub');
-  const list = document.getElementById('flagList');
-
-  if (flaggedItems.length === 0) {
-    sub.textContent  = 'No exclusions have been flagged yet.';
-    list.innerHTML   = '';
-  } else {
-    sub.textContent = `${flaggedItems.length} exclusion(s) flagged for attention.`;
-    list.innerHTML  = flaggedItems.map(d => `
-      <li class="modal-item">
-        <div>${esc(d.name || '(unnamed)')}</div>
-        <div class="modal-item-id">ID: ${esc(String(d.id ?? ''))} &nbsp;|&nbsp; ${d.isDisabled ? 'DISABLED' : 'ENABLED'}</div>
-      </li>`).join('');
-  }
-  document.getElementById('flagModal').classList.add('open');
-}
-
-function closeFlagModal() {
-  document.getElementById('flagModal').classList.remove('open');
-}
-
-function downloadFlagged() {
-  const flaggedItems = allData.filter(d => flagged.has(String(d.id)));
-  if (flaggedItems.length === 0) { alert('No flagged exclusions to export.'); return; }
-  const blob = new Blob([JSON.stringify(flaggedItems, null, 2)], { type: 'application/json' });
-  const a    = document.createElement('a');
-  a.href     = URL.createObjectURL(blob);
-  a.download = `ESET_Flagged_Exclusions_${new Date().toISOString().slice(0,10)}.json`;
-  a.click();
-  closeFlagModal();
-}
-
-// ============================================================
-// XML / UTILS
-// ============================================================
-function copyXml() {
-  const d = filteredData[currentIndex];
-  if (!d || !d.xmlBody) return;
-  navigator.clipboard.writeText(d.xmlBody).then(() => {
-    const btn = document.getElementById('copyBtn');
-    if (btn) { btn.textContent = 'Copied!'; btn.classList.add('copied'); setTimeout(() => { btn.textContent = 'Copy XML'; btn.classList.remove('copied'); }, 2000); }
-  });
-}
-
-function highlightXml(xml) {
-  if (!xml) return '';
-  let s = xml.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-  s = s.replace(/(&lt;!--[\s\S]*?--&gt;)/g, '<span class="xml-comment">$1</span>');
-  s = s.replace(/(&lt;\/?)([\w:\-\.]+)((?:\s+[\w:\-\.]+\s*=\s*&quot;[^&]*&quot;)*)\s*(\/?&gt;)/g,
-    (_, open, tag, attrs, close) => {
-      const attrsHtml = attrs.replace(/([\w:\-\.]+)\s*=\s*(&quot;[^&]*&quot;)/g,
-        '<span class="xml-attr">$1</span>=<span class="xml-val">$2</span>');
-      return `${open}<span class="xml-tag">${tag}</span>${attrsHtml}${close}`;
-    });
-  s = s.replace(/(&lt;\/?)([\w:\-\.]+)(\s*\/?&gt;)/g,
-    (m, open, tag, close) => `${open}<span class="xml-tag">${tag}</span>${close}`);
-  return s;
+function strColor(s) {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = s.charCodeAt(i) + ((h << 5) - h);
+  const palette = ['#1a4a7a','#1a6b3c','#7c3aed','#b35c00','#c0392b','#1a5a5a','#4f8ef7'];
+  return palette[Math.abs(h) % palette.length];
 }
 
 function esc(s) {
   return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-function navigate(dir) {
-  const next = currentIndex + dir;
-  if (next >= 0 && next < filteredData.length) selectItem(next);
+function toggleFlag(id) {
+  if (flagged.has(id)) flagged.delete(id); else flagged.add(id);
+  updateStats(); renderSidebar(); renderDetail(curIdx);
+}
+
+function updateStats() {
+  const total   = allData.length;
+  const threats = allData.filter(d => d._sev === 'threat').length;
+  const unres   = allData.filter(d => !d.resolved).length;
+  const noted   = allData.filter(d => d._hasNote || d._hasComments).length;
+  const nFlag   = flagged.size;
+  document.getElementById('topbarStats').innerHTML = `
+    <span class="stat-chip total">Total: ${total}</span>
+    <span class="stat-chip threat">Threat: ${threats}</span>
+    <span class="stat-chip unres">Unresolved: ${unres}</span>
+    <span class="stat-chip noted">With Notes: ${noted}</span>
+    <span class="stat-chip flagged">Flagged: ${nFlag}</span>`;
 }
 
 // ============================================================
-// STATS PANEL
+// FLAG EXPORT
 // ============================================================
-function toggleStatsPanel() {
-  const panel = document.getElementById('statsPanel');
-  if (!panel) return;
-  panel.classList.toggle('open');
-  if (panel.classList.contains('open')) renderStats();
+function openFlagModal() {
+  const items = allData.filter(d => flagged.has(String(d.id)));
+  const sub   = document.getElementById('flagModalSub');
+  const list  = document.getElementById('flagList');
+  sub.textContent = items.length
+    ? `${items.length} detection${items.length!==1?'s':''} flagged for follow-up.`
+    : 'No detections flagged yet. Use the "Flag for review" button on each detection.';
+  list.innerHTML = items.map(d => `
+    <li class="modal-item">
+      <div>${esc(d.threatName || d.ruleName || d.typeLabel || '(unknown)')}</div>
+      <div class="modal-item-id">ID: ${esc(String(d.id))} &nbsp;|&nbsp; ${esc(d.computerName||'')} &nbsp;|&nbsp; ${(d._sev||'').toUpperCase()} &nbsp;|&nbsp; ${d.resolved?'Resolved':'Open'}</div>
+    </li>`).join('');
+  document.getElementById('flagModal').classList.add('open');
 }
 
-function toggleStatsMode() {
-  statsShowPct = !statsShowPct;
-  const btn = document.getElementById('statsToggleMode');
-  if (btn) { btn.textContent = statsShowPct ? 'Show #' : 'Show %'; btn.classList.toggle('on', statsShowPct); }
-  renderStats();
-}
+function closeFlagModal() { document.getElementById('flagModal').classList.remove('open'); }
 
-function renderStats() {
-  const grid = document.getElementById('statsGrid');
-  if (!grid) return;
-
-  // Count exclusions per author from the loaded export data
-  // excludedReviewers Set is reused here as "excludedAuthors" for filtering
-  const counts = {};
-  allData.forEach(d => {
-    const name = (d.author && d.author.trim()) ? d.author.trim() : '(unknown)';
-    counts[name] = (counts[name] || 0) + 1;
-  });
-
-  if (Object.keys(counts).length === 0) {
-    grid.innerHTML = '<span style="color:var(--muted);font-size:13px;font-style:italic">No exclusion data loaded yet.</span>';
-    return;
-  }
-
-  // Total excluding any excluded authors (for percentage calculation)
-  const includedTotal = Object.entries(counts)
-    .filter(([name]) => !excludedReviewers.has(name))
-    .reduce((sum, [, n]) => sum + n, 0);
-  const grandTotal = Object.values(counts).reduce((s, n) => s + n, 0);
-
-  const maxCount = Math.max(...Object.values(counts));
-
-  grid.innerHTML = Object.entries(counts)
-    .sort((a, b) => b[1] - a[1])
-    .map(([name, count]) => {
-      const isExcluded = excludedReviewers.has(name);
-      const base       = statsShowPct ? (isExcluded ? grandTotal : includedTotal) : grandTotal;
-      const pct        = base > 0 ? ((count / base) * 100).toFixed(1) : '0.0';
-      const barWidth   = maxCount > 0 ? Math.round((count / maxCount) * 100) : 0;
-      const label      = statsShowPct ? pct + '%' : count + ' / ' + grandTotal;
-      return '<div class="stats-row' + (isExcluded ? ' excluded' : '') + '" onclick="toggleExcludeAuthor(this.dataset.name)" data-name="' + esc(name) + '" title="Click to exclude this author from stats">'
-        + '<span class="stats-name">' + esc(name) + '</span>'
-        + '<div class="stats-bar-wrap"><div class="stats-bar" style="width:' + (isExcluded ? 0 : barWidth) + '%"></div></div>'
-        + '<span class="stats-count">' + label + '</span>'
-        + '</div>';
-    }).join('');
-}
-
-function toggleExcludeAuthor(name) {
-  if (excludedReviewers.has(name)) excludedReviewers.delete(name);
-  else excludedReviewers.add(name);
-  renderStats();
+function downloadFlagged() {
+  const items = allData.filter(d => flagged.has(String(d.id)));
+  if (!items.length) { alert('No flagged detections to export.'); return; }
+  const blob = new Blob([JSON.stringify(items, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `ESET_Flagged_Detections_${new Date().toISOString().slice(0,10)}.json`;
+  a.click();
+  closeFlagModal();
 }
 
 // ============================================================
-// XML PRETTY PRINT
+// KEYBOARD
 // ============================================================
-function prettyXml(xml) {
-  if (!xml || !xml.trim()) return xml;
-  try {
-    // Use DOMParser to parse and re-serialise with indentation
-    const parser = new DOMParser();
-    const doc    = parser.parseFromString(xml.trim(), 'application/xml');
-    const err    = doc.querySelector('parsererror');
-    if (err) return xml; // not valid XML -- return as-is
-    return serializeXml(doc.documentElement, 0);
-  } catch(e) { return xml; }
-}
-
-function serializeXml(node, depth) {
-  const indent = '  '.repeat(depth);
-  if (node.nodeType === 3) { // text node
-    const text = node.textContent.trim();
-    return text ? indent + text : '';
-  }
-  if (node.nodeType !== 1) return ''; // not element
-
-  const tag   = node.tagName;
-  const attrs = Array.from(node.attributes)
-    .map(a => ' ' + a.name + '="' + a.value + '"').join('');
-
-  const children = Array.from(node.childNodes)
-    .map(c => serializeXml(c, depth + 1))
-    .filter(s => s.trim() !== '');
-
-  if (children.length === 0) return indent + '<' + tag + attrs + '/>';
-  if (children.length === 1 && !children[0].includes('\n')) {
-    return indent + '<' + tag + attrs + '>' + children[0].trim() + '</' + tag + '>';
-  }
-  return indent + '<' + tag + attrs + '>\n' + children.join('\n') + '\n' + indent + '</' + tag + '>';
-}
-
 document.addEventListener('keydown', e => {
   if (app.style.display === 'none') return;
   if (document.getElementById('flagModal').classList.contains('open')) return;
-  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+  if (e.target.tagName === 'INPUT') return;
   if (e.key === 'ArrowRight' || e.key === 'ArrowDown') { e.preventDefault(); navigate(1); }
   if (e.key === 'ArrowLeft'  || e.key === 'ArrowUp')   { e.preventDefault(); navigate(-1); }
-  if (e.key === 'f' || e.key === 'F') { const d = filteredData[currentIndex]; if (d) toggleFlag(String(d.id)); }
-  if (e.key === 'r' || e.key === 'R') { const d = filteredData[currentIndex]; if (d) markReviewed(String(d.id)); }
+  if (e.key === 'f' || e.key === 'F') { const d = filtered[curIdx]; if (d) toggleFlag(d.id); }
 });
 </script>
 </body>
