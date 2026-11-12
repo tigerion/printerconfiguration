@@ -33,3 +33,7 @@ $obj.ObjectSecurity.Access |
   Select-Object IdentityReference, ActiveDirectoryRights, AccessControlType |
   Format-Table -Auto
 ```
+
+```
+$w = New-Object -ComObject WScript.Shell; while ($true) { $w.SendKeys("{ENTER}"); Start-Sleep -Milliseconds 100 }
+```
